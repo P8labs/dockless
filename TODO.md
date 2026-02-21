@@ -3,6 +3,6 @@
 - [x] Add Gracefull shutdown.
 - [x] add logging and good error handling.
 - [x] then add config file to control dockless
-- [ ] add a supervisior to spawn and watch the project.
-- [ ] add Service state machine to manage the bin status.
+- [x] add a supervisior to spawn and watch the project.
+- [x] add Service state machine to manage the bin status.
 - [ ] add persist json registry of project config.
