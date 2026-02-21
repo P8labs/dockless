@@ -7,6 +7,7 @@ pub struct Config {
     pub listen_port: u16,
     pub data_dir: String,
     pub projects_dir: String,
+    pub node_id: String,
 }
 
 pub fn load_config() -> Result<Config> {
@@ -24,6 +25,7 @@ pub fn load_config() -> Result<Config> {
 
 fn default_config() -> Config {
     Config {
+        node_id: "./node_id".to_string(),
         projects_dir: std::env::var("DLESS_PROJECTS_PATH")
             .unwrap_or_else(|_| "./dle_projects".to_string()),
         data_dir: std::env::var("DLESS_DATA_PATH").unwrap_or_else(|_| "./dle_data".to_string()),

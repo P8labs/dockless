@@ -21,21 +21,29 @@ impl Supervisor {
     pub async fn run_supervised(
         &mut self,
         service: Service,
-        mut shutdown_rx: broadcast::Receiver<()>,
+        mut global_shutdown_rx: broadcast::Receiver<()>,
+        mut service_shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
+        let mut restart_count = 0;
         loop {
             info!("starting child process: {}", service.binary_path);
             service.set_state(ServiceState::Starting).await;
 
-            let child = Command::new(&service.binary_path)
+            let mut cmd = Command::new(&service.binary_path);
+            cmd.args(&service.args);
+            for (k, v) in &service.env {
+                cmd.env(k, v);
+            }
+
+            let child = cmd
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .spawn()
                 .with_context(|| {
                     format!("failed to spawn child process at {}", service.binary_path)
                 })?;
-
             self.child = Some(child);
+
             service.set_state(ServiceState::Running).await;
 
             let wait_future = async {
@@ -50,13 +58,26 @@ impl Supervisor {
             };
 
             tokio::select! {
-                _ = shutdown_rx.recv() => {
-                    info!("shutdown received in supervisor");
+                _ = global_shutdown_rx.recv() => {
+                    info!("[{}] global shutdown received in supervisor", service.id);
                     service.set_state(ServiceState::Stopping).await;
 
                     if let Some(child) = &mut self.child {
-                        info!("terminating child process");
                         let _ = child.kill().await;
+                        let _ = child.wait().await;
+                    }
+
+                    service.set_state(ServiceState::Stopped).await;
+                    break;
+                }
+
+                _ = service_shutdown_rx.recv() => {
+                    info!("[{}] service shutdown received in supervisor", service.id);
+                    service.set_state(ServiceState::Stopping).await;
+
+                    if let Some(child) = &mut self.child {
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
                     }
 
                     service.set_state(ServiceState::Stopped).await;
@@ -66,17 +87,38 @@ impl Supervisor {
                 result = wait_future => {
                     let status = result?;
 
-                    info!("child exited with status: {}", status);
-
-                    if status.success() {
-                        service.set_state(ServiceState::Stopped).await;
-                    } else {
-                        service.set_state(ServiceState::Crashed).await;
-                    }
+                    info!("[{}] child exited with status: {}", service.id, status);
 
                     self.child = None;
 
-                    info!("restarting child in 3 seconds...");
+                    if global_shutdown_rx.try_recv().is_ok() ||
+                       service_shutdown_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    if status.success() {
+                        restart_count = 0;
+                        service.set_state(ServiceState::Stopped).await;
+                    } else {
+                        service.set_state(ServiceState::Crashed).await;
+                        restart_count += 1;
+                    }
+
+                    if !service.auto_restart {
+                        break;
+                    }
+
+
+
+
+
+                    if let Some(limit) = service.restart_limit {
+                        if restart_count >= limit {
+                            service.set_state(ServiceState::Failed).await;
+                            break;
+                        }
+                    }
+
+                    info!("[{}] restarting child in 3 seconds...", service.id);
                     sleep(Duration::from_secs(3)).await;
                 }
             }
