@@ -1,0 +1,3 @@
+- [x] Create a persist node id file to identify the node.
+- [x] Setup a simple API server.
+- [x] Add Gracefull shutdown.
