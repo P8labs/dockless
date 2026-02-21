@@ -1,3 +1,8 @@
 - [x] Create a persist node id file to identify the node.
 - [x] Setup a simple API server.
 - [x] Add Gracefull shutdown.
+- [x] add logging and good error handling.
+- [x] then add config file to control dockless
+- [ ] add a supervisior to spawn and watch the project.
+- [ ] add Service state machine to manage the bin status.
+- [ ] add persist json registry of project config.
