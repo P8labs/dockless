@@ -14,12 +14,21 @@
 
 [22/02/2026]
 
-- [ ] Refactor project into module-based structure (separate runtime, registry, api layers)
-- [ ] Create data/services/<id>/ directory structure on service creation
-- [ ] Enforce service binary must live inside its own service directory
-- [ ] Add working_dir support in Service + Supervisor spawn
-- [ ] Add GET /registry endpoint to expose raw definitions
-- [ ] Implement restart backoff (replace fixed 3s with exponential)
-- [ ] Add Failed state handling visibility in /services output
-- [ ] Add basic validation layer for ServiceDefinition (id format, path safety)
-- [ ] Add structured per-service log prefix formatting
+- [x] Refactor project into module-based structure (separate runtime, registry, api layers)
+- [x] Create data/services/<id>/ directory structure on service creation
+- [x] Enforce service binary must live inside its own service directory
+- [x] Add working_dir support in Service + Supervisor spawn
+- [x] Add GET /registry endpoint to expose raw definitions
+- [x] Implement restart backoff (replace fixed 3s with exponential)
+- [x] Add basic validation layer for ServiceDefinition (id format, path safety)
+- [x] Implement artifact/upload endpoint (versioned)
+- [x] Implement GitHub release downloader (basic)
+- [x] Create portal/ project using SvelteKit
+- [x] Configure static adapter (SSG output)
+- [x] Build production and verify static output
+
+[23/02/2026]
+
+- [ ] Fix UI bugs and design it for better looks
+- [ ] Add streaming logs view in portal
+- [ ] Add system usage service specific
