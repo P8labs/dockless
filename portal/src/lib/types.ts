@@ -32,7 +32,7 @@ export interface HealthInfo {
   name: string;
   status: string;
   node_id: string;
-  stats?: SystemStats;
+  stats: SystemStats;
 }
 
 export interface ArtifactInfo {

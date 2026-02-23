@@ -29,6 +29,10 @@
 
 [23/02/2026]
 
-- [ ] Fix UI bugs and design it for better looks
+- [x] Fix UI bugs and design it for better looks
+- [x] Fixed backend service state management bug
+
+[24/02/2026]
+
 - [ ] Add streaming logs view in portal
 - [ ] Add system usage service specific

@@ -1,7 +1,11 @@
 <script lang="ts">
+  import Toaster from "$lib/components/Toast.svelte";
   import "./layout.css";
 
   let { children } = $props();
 </script>
 
-{@render children()}
+<div class="min-h-screen">
+  {@render children()}
+  <Toaster />
+</div>

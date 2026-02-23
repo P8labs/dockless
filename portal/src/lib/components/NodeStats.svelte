@@ -1,36 +1,9 @@
 <script lang="ts">
   import type { SystemStats } from "$lib/types";
+  import { formatBytes, formatMB, formatUptime } from "$lib/utils";
+  import { Progress } from "@skeletonlabs/skeleton-svelte";
 
   let { stats }: { stats: SystemStats } = $props();
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const k = 1024;
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-    const value = bytes / Math.pow(k, i);
-    return `${value.toFixed(i >= 3 ? 1 : 0)} ${units[i]}`;
-  }
-
-  function formatMB(bytes: number): string {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  function formatUptime(seconds: number): string {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-
-    if (days > 0) {
-      return `${days}d ${hours}h ${minutes}m`;
-    }
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
-  }
 
   const displayStats = $derived(stats);
   const memoryPercent = $derived(
@@ -41,88 +14,112 @@
   );
 </script>
 
-<div class="bg-white border border-gray-200 rounded-lg p-4">
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="space-y-1">
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-gray-500">CPU</span>
-        <span class="text-xs font-mono text-gray-900"
-          >{displayStats.cpu_usage.toFixed(1)}%</span
-        >
+<div class="card w-full bg-surface-50-950/60 p-4 text-center">
+  <div
+    class="flex justify-between items-center flex-col space-y-3 md:space-x-3 md:flex-row"
+  >
+    <div class="flex justify-between items-center w-full">
+      <div class="flex flex-col items-start">
+        <span>Total CPU</span>
       </div>
-      <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-        <div
-          class="h-full rounded-full transition-all duration-500 {displayStats.cpu_usage >
-          80
-            ? 'bg-red-500'
-            : displayStats.cpu_usage > 60
-              ? 'bg-yellow-500'
-              : 'bg-green-500'}"
-          style="width: {displayStats.cpu_usage}%"
-        ></div>
-      </div>
+      <Progress value={displayStats.cpu_usage} class="w-fit relative">
+        <div class="absolute inset-0 flex items-center justify-center">
+          <Progress.ValueText class="text-xs">
+            <Progress.Context>
+              {#snippet children(progress)}
+                {progress().value?.toFixed(1)}%
+              {/snippet}
+            </Progress.Context>
+          </Progress.ValueText>
+        </div>
+        <Progress.Circle class="[--size:--spacing(12)]">
+          <Progress.CircleTrack />
+          <Progress.CircleRange />
+        </Progress.Circle>
+      </Progress>
     </div>
 
     <div
-      class="space-y-1"
+      class="flex justify-between items-center w-full"
       title="{formatMB(displayStats.memory_used)} / {formatMB(
         displayStats.memory_total,
       )}"
     >
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-gray-500">Memory</span>
-        <span class="text-xs font-mono text-gray-900"
+      <div class="flex items-start flex-col">
+        <span class="text-xs">Memory</span>
+        <span class="text-xs font-mono"
           >{formatBytes(displayStats.memory_used)}/{formatBytes(
             displayStats.memory_total,
-          )}</span
-        >
+          )}
+        </span>
       </div>
-      <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-        <div
-          class="h-full rounded-full transition-all duration-500 {memoryPercent >
-          80
-            ? 'bg-red-500'
-            : memoryPercent > 60
-              ? 'bg-yellow-500'
-              : 'bg-blue-500'}"
-          style="width: {memoryPercent}%"
-        ></div>
-      </div>
+
+      <Progress value={memoryPercent} class="w-fit relative">
+        <div class="absolute inset-0 flex items-center justify-center">
+          <Progress.ValueText class="text-xs">
+            <Progress.Context>
+              {#snippet children(progress)}
+                {progress().value?.toFixed(1)}%
+              {/snippet}
+            </Progress.Context>
+          </Progress.ValueText>
+        </div>
+        <Progress.Circle class="[--size:--spacing(12)]">
+          <Progress.CircleTrack
+            class={memoryPercent > 80
+              ? "stroke-tertiary-50-950"
+              : memoryPercent > 60
+                ? "stroke-secondary-50-950"
+                : ""}
+          />
+          <Progress.CircleRange
+            class={memoryPercent > 80
+              ? "stroke-tertiary-500"
+              : memoryPercent > 60
+                ? "stroke-secondary-500"
+                : ""}
+          />
+        </Progress.Circle>
+      </Progress>
     </div>
 
-    <div class="space-y-1">
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-gray-500">Disk</span>
-        <span class="text-xs font-mono text-gray-900"
+    <div class="flex justify-between items-center w-full">
+      <div class="flex items-start flex-col">
+        <span class="text-xs">Disk</span>
+        <span class="text-xs font-mono"
           >{formatBytes(displayStats.disk_used)}/{formatBytes(
             displayStats.disk_total,
           )}</span
         >
       </div>
-      <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-        <div
-          class="h-full rounded-full transition-all duration-500 {diskPercent >
-          80
-            ? 'bg-red-500'
-            : diskPercent > 60
-              ? 'bg-yellow-500'
-              : 'bg-purple-500'}"
-          style="width: {diskPercent}%"
-        ></div>
-      </div>
-    </div>
 
-    <div class="space-y-1">
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-gray-500">Uptime</span>
-        <span class="text-xs font-mono text-gray-900"
-          >{formatUptime(displayStats.uptime)}</span
-        >
-      </div>
-      <div class="flex items-center gap-2 mt-1">
-        <div class="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse"></div>
-        <span class="text-xs text-gray-500">Online</span>
-      </div>
+      <Progress value={diskPercent} class="w-fit relative">
+        <div class="absolute inset-0 flex items-center justify-center">
+          <Progress.ValueText class="text-xs">
+            <Progress.Context>
+              {#snippet children(progress)}
+                {progress().value?.toFixed(1)}%
+              {/snippet}
+            </Progress.Context>
+          </Progress.ValueText>
+        </div>
+        <Progress.Circle class="[--size:--spacing(12)]">
+          <Progress.CircleTrack
+            class={diskPercent > 80
+              ? "stroke-tertiary-50-950"
+              : diskPercent > 60
+                ? "stroke-secondary-50-950"
+                : ""}
+          />
+          <Progress.CircleRange
+            class={diskPercent > 80
+              ? "stroke-tertiary-500"
+              : diskPercent > 60
+                ? "stroke-secondary-500"
+                : ""}
+          />
+        </Progress.Circle>
+      </Progress>
     </div>
   </div>
 </div>

@@ -6,7 +6,6 @@
   import * as api from "$lib/api";
   import { toasts } from "$lib/toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
-  import ToastContainer from "$lib/components/ToastContainer.svelte";
   import { get } from "svelte/store";
   import type { ArtifactInfo } from "$lib/types";
 
@@ -169,8 +168,6 @@
 </script>
 
 <div class="min-h-screen bg-gray-50">
-  <TopBar />
-
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Back Button -->
     <button
@@ -670,6 +667,4 @@
       </div>
     {/if}
   </main>
-
-  <ToastContainer />
 </div>
