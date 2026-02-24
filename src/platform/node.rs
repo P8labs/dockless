@@ -1,9 +1,9 @@
 use crate::{
     config::{Config, load_config},
     identity,
+    platform::port_manager::PortManager,
     registry::RegistryManager,
-    runtime::service::Service,
-    runtime::supervisor_manager::SupervisorManager,
+    runtime::{service::Service, supervisor_manager::SupervisorManager},
 };
 use anyhow::{Context, Result};
 use std::{fs, sync::Arc};
@@ -15,6 +15,7 @@ pub struct Node {
     pub config: Config,
     pub registry: Arc<RwLock<RegistryManager>>,
     pub manager: Arc<RwLock<SupervisorManager>>,
+    pub port_manager: Arc<RwLock<PortManager>>,
 }
 
 impl Node {
@@ -25,11 +26,20 @@ impl Node {
         fs::create_dir_all(&config.data_dir).context("failed to create data directory")?;
         let registry_path = format!("{}/projects.json", config.data_dir);
         let registry = RegistryManager::load_or_init(&registry_path)?;
+
+        let ports_path = format!("{}/ports.json", config.data_dir);
+        let mut port_manager = PortManager::load_or_init(&ports_path)?;
+
         let definitions = registry.list_definitions();
 
         let mut manager = SupervisorManager::new();
 
         for def in definitions {
+            // Skip services that are not ready
+            if !def.ready {
+                continue;
+            }
+
             let service_root = format!("{}/services/{}", config.data_dir, def.id);
             let bin_dir = format!("{}/bin", service_root);
             let data_dir = format!("{}/data", service_root);
@@ -42,12 +52,18 @@ impl Node {
             fs::create_dir_all(&logs_dir)
                 .with_context(|| format!("failed to create logs dir for {}", def.id))?;
 
+            let mut env = def.env.clone();
+
+            // Allocate port if not already allocated
+            let port = port_manager.allocate(&def.id)?;
+            env.insert("PORT".to_string(), port.to_string());
+
             let service = Service::new(
                 def.id.clone(),
                 def.name.clone(),
                 def.binary_path.clone(),
                 def.args.clone(),
-                def.env.clone(),
+                env,
                 def.auto_restart,
                 def.restart_limit,
                 service_root,
@@ -61,6 +77,7 @@ impl Node {
             config,
             registry: Arc::new(RwLock::new(registry)),
             manager: Arc::new(RwLock::new(manager)),
+            port_manager: Arc::new(RwLock::new(port_manager)),
         });
     }
 }

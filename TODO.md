@@ -34,5 +34,8 @@
 
 [24/02/2026]
 
-- [ ] Add streaming logs view in portal
-- [ ] Add system usage service specific
+- [x] Add A way to add service specific configs
+- [x] Add port forwarding management
+- [x] Service creation in parts.
+- [x] Add streaming logs view in portal
+- [x] Add system usage service specific

@@ -4,6 +4,9 @@ import type {
   HealthInfo,
   ArtifactInfo,
   ApiResponse,
+  ServiceConfig,
+  LogEntry,
+  ServiceStats,
 } from "./types";
 
 const BASE = "http://localhost:8000/api";
@@ -36,6 +39,37 @@ export async function createService(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(def),
+  });
+}
+
+export async function initService(
+  name: string,
+  id?: string,
+): Promise<ApiResponse & { id?: string }> {
+  return request("/services/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, id }),
+  });
+}
+
+export async function getService(id: string): Promise<ServiceDefinition> {
+  return request(`/services/${id}`);
+}
+
+export async function configureService(
+  id: string,
+  config: {
+    env?: Record<string, string>;
+    args?: string[];
+    auto_restart?: boolean;
+    restart_limit?: number | null;
+  },
+): Promise<ApiResponse> {
+  return request(`/services/${id}/configure`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
   });
 }
 
@@ -84,4 +118,51 @@ export async function installGithubArtifact(
 
 export async function getArtifactInfo(id: string): Promise<ArtifactInfo> {
   return request(`/services/${id}/artifact`);
+}
+
+export async function getServiceConfig(id: string): Promise<ServiceConfig> {
+  return request(`/services/${id}/config`);
+}
+
+export async function updateServiceConfig(
+  id: string,
+  config: Record<string, string>,
+): Promise<ApiResponse> {
+  return request(`/services/${id}/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config }),
+  });
+}
+
+export async function createConfigTemplate(
+  id: string,
+  fields: Record<
+    string,
+    { value: string; field_type: string; description?: string }
+  >,
+): Promise<ApiResponse> {
+  return request(`/services/${id}/config/template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields }),
+  });
+}
+
+export async function getLogs(
+  id: string,
+): Promise<{ service: string; logs: LogEntry[] }> {
+  return request(`/services/${id}/logs`);
+}
+
+export async function clearLogs(id: string): Promise<ApiResponse> {
+  return request(`/services/${id}/logs/clear`, { method: "POST" });
+}
+
+export function streamLogs(id: string): EventSource {
+  return new EventSource(`${BASE}/services/${id}/logs/stream`);
+}
+
+export async function getServiceStats(id: string): Promise<ServiceStats> {
+  return request(`/services/${id}/stats`);
 }

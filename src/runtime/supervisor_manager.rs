@@ -42,6 +42,14 @@ impl SupervisorManager {
         Ok(())
     }
 
+    pub fn update_service(&mut self, service: Service) -> anyhow::Result<()> {
+        if !self.services.contains_key(&service.id) {
+            anyhow::bail!("service {} not registered", service.id);
+        }
+        self.services.insert(service.id.clone(), service);
+        Ok(())
+    }
+
     pub fn service_count(&self) -> usize {
         self.services.len()
     }
@@ -91,8 +99,17 @@ impl SupervisorManager {
     pub async fn stop(&mut self, id: &str) -> anyhow::Result<()> {
         if let Some(handle) = self.supervisors.remove(id) {
             let _ = handle.shutdown_tx.send(());
-            let _ = handle.join_handle.await;
-            Ok(())
+
+            // Add timeout to prevent hanging forever on join
+            match tokio::time::timeout(tokio::time::Duration::from_secs(30), handle.join_handle)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(_) => {
+                    tracing::warn!("[{}] supervisor failed to stop within timeout", id);
+                    Ok(())
+                }
+            }
         } else {
             anyhow::bail!("service {} not running", id);
         }
@@ -120,6 +137,10 @@ impl SupervisorManager {
         result
     }
 
+    pub async fn list_cloned(&self) -> Vec<Service> {
+        self.services.values().cloned().collect()
+    }
+
     pub async fn start_all(&mut self) -> anyhow::Result<()> {
         let ids: Vec<String> = self.services.keys().cloned().collect();
 
@@ -135,8 +156,18 @@ impl SupervisorManager {
     pub async fn shutdown_all(&mut self) {
         let _ = self.shutdown_tx.send(());
 
-        for (_, handle) in self.supervisors.drain() {
-            let _ = handle.join_handle.await;
+        let handles: Vec<_> = self.supervisors.drain().collect();
+
+        // Use timeout for each supervisor shutdown
+        for (id, handle) in handles {
+            match tokio::time::timeout(tokio::time::Duration::from_secs(30), handle.join_handle)
+                .await
+            {
+                Ok(_) => tracing::info!("[{}] supervisor stopped", id),
+                Err(_) => {
+                    tracing::warn!("[{}] supervisor failed to stop within timeout, forcing", id)
+                }
+            }
         }
     }
 }

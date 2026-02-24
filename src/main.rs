@@ -42,7 +42,17 @@ async fn run() -> anyhow::Result<()> {
     api::server::start_api(&node).await?;
     info!("dockless shutting down");
 
-    node.manager.write().await.shutdown_all().await;
+    // Add timeout to shutdown to prevent hanging on Ctrl+C
+    let shutdown_future = async {
+        node.manager.write().await.shutdown_all().await;
+    };
+
+    match tokio::time::timeout(tokio::time::Duration::from_secs(60), shutdown_future).await {
+        Ok(_) => info!("all services stopped gracefully"),
+        Err(_) => {
+            error!("shutdown timed out after 60s, forcing exit");
+        }
+    }
 
     Ok(())
 }

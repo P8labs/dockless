@@ -3,11 +3,15 @@ use axum::extract::{Multipart, Path, State};
 use axum::{
     Json, Router,
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Sse},
     routing::{delete, get, post},
 };
 use serde_json::json;
+use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fs;
+use std::time::Duration;
+use sysinfo::System;
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +24,10 @@ pub fn routes() -> Router<Node> {
     Router::new()
         .route("/services", get(list_services))
         .route("/services", post(create_service))
+        .route("/services/init", post(init_service))
+        .route("/services/{id}", get(get_service))
         .route("/services/{id}", delete(delete_service))
+        .route("/services/{id}/configure", post(configure_service))
         .route("/services/{id}/start", post(start_service))
         .route("/services/{id}/stop", post(stop_service))
         .route("/services/{id}/restart", post(restart_service))
@@ -30,6 +37,17 @@ pub fn routes() -> Router<Node> {
             post(install_github_artifact),
         )
         .route("/services/{id}/artifact", get(get_artifact_info))
+        .route("/services/{id}/config", get(get_service_config))
+        .route("/services/{id}/config", post(update_service_config))
+        .route(
+            "/services/{id}/config/template",
+            post(create_or_update_template),
+        )
+        .route("/services/ports", get(get_port_allocations))
+        .route("/services/{id}/logs", get(get_logs))
+        .route("/services/{id}/logs/stream", get(stream_logs))
+        .route("/services/{id}/logs/clear", post(clear_logs))
+        .route("/services/{id}/stats", get(get_service_stats))
 }
 
 #[derive(Serialize)]
@@ -37,24 +55,290 @@ struct ServiceInfo {
     id: String,
     name: String,
     state: ServiceState,
+    ready: bool,
 }
 async fn list_services(State(node): State<Node>) -> impl IntoResponse {
     let mut services = Vec::new();
 
+    let registry = node.registry.read().await;
+
     for service in node.manager.read().await.list().await.iter() {
         let state = service.get_state().await;
+        let def = registry.get(&service.id);
+        let ready = def.map(|d| d.ready).unwrap_or(false);
 
         services.push(ServiceInfo {
             id: service.id.clone(),
             name: service.name.clone(),
             state,
+            ready,
         });
     }
 
     Json(services)
 }
 
+#[derive(Deserialize)]
+struct InitServiceRequest {
+    name: String,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+async fn init_service(
+    State(node): State<Node>,
+    Json(req): Json<InitServiceRequest>,
+) -> impl IntoResponse {
+    if req.name.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": false,
+                "error": "name is required"
+            })),
+        )
+            .into_response();
+    }
+
+    // Generate ID from name if not provided
+    let id = req.id.unwrap_or_else(|| {
+        req.name
+            .to_lowercase()
+            .replace(char::is_whitespace, "-")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect()
+    });
+
+    let service_root = format!("{}/services/{}", node.config.data_dir, id);
+    let bin_dir = format!("{}/bin", service_root);
+    let data_dir = format!("{}/data", service_root);
+    let logs_dir = format!("{}/logs", service_root);
+    let versions_dir = format!("{}/versions", service_root);
+
+    if let Err(e) = std::fs::create_dir_all(&bin_dir)
+        .and_then(|_| std::fs::create_dir_all(&data_dir))
+        .and_then(|_| std::fs::create_dir_all(&logs_dir))
+        .and_then(|_| std::fs::create_dir_all(&versions_dir))
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "status": false,
+                "error": format!("failed to create service directories: {}", e)
+            })),
+        )
+            .into_response();
+    }
+
+    let def = ServiceDefinition {
+        id: id.clone(),
+        name: req.name.clone(),
+        ready: false,
+        binary_path: String::new(),
+        args: vec![],
+        env: HashMap::new(),
+        auto_restart: true,
+        restart_limit: None,
+        current_version: None,
+        port: None,
+    };
+
+    {
+        let mut registry = node.registry.write().await;
+        if let Err(e) = registry.add(def.clone()) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "status": false,
+                    "error": e.to_string()
+                })),
+            )
+                .into_response();
+        }
+
+        if let Err(e) = registry.save() {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "status": false,
+                    "error": e.to_string()
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    // Allocate port for the service
+    {
+        let mut port_manager = node.port_manager.write().await;
+        if let Err(e) = port_manager.allocate(&id) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "status": false,
+                    "error": format!("failed to allocate port: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "status": true,
+            "message": "Service initialized",
+            "id": id
+        })),
+    )
+        .into_response()
+}
+
+async fn get_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    let def = {
+        let registry = node.registry.read().await;
+        match registry.get(&id) {
+            Some(d) => d.clone(),
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({
+                        "status": false,
+                        "error": "service not found"
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    // Get the port for this service
+    let port = {
+        let port_manager = node.port_manager.read().await;
+        port_manager.get_port(&id)
+    };
+
+    // Construct response with port included
+    let mut response = json!({
+        "id": def.id,
+        "name": def.name,
+        "ready": def.ready,
+        "binary_path": def.binary_path,
+        "args": def.args,
+        "env": def.env,
+        "auto_restart": def.auto_restart,
+        "restart_limit": def.restart_limit,
+        "current_version": def.current_version,
+    });
+
+    if let Some(port_num) = port {
+        response["port"] = json!(port_num);
+    }
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ConfigureServiceRequest {
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub auto_restart: Option<bool>,
+    #[serde(default)]
+    pub restart_limit: Option<u32>,
+}
+
+async fn configure_service(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+    Json(req): Json<ConfigureServiceRequest>,
+) -> impl IntoResponse {
+    let mut registry = node.registry.write().await;
+
+    let def = match registry.get(&id) {
+        Some(d) => d.clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "service not found"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let updated_def = ServiceDefinition {
+        env: req.env,
+        args: req.args,
+        auto_restart: req.auto_restart.unwrap_or(def.auto_restart),
+        restart_limit: req.restart_limit,
+        ..def
+    };
+
+    if let Err(e) = registry.update(&id, updated_def) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "status": false,
+                "error": e.to_string()
+            })),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = registry.save() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "status": false,
+                "error": e.to_string()
+            })),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": true,
+            "message": "Service configured"
+        })),
+    )
+        .into_response()
+}
+
 async fn start_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    // Check if service is ready
+    {
+        let registry = node.registry.read().await;
+        if let Some(def) = registry.get(&id) {
+            if !def.ready {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": false,
+                        "error": "Service is not ready. Please upload a binary first."
+                    })),
+                )
+                    .into_response();
+            }
+        } else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "Service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let service_exists = node
         .manager
         .read()
@@ -99,6 +383,32 @@ async fn start_service(State(node): State<Node>, Path(id): Path<String>) -> impl
 }
 
 async fn stop_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    // Check if service is ready
+    {
+        let registry = node.registry.read().await;
+        if let Some(def) = registry.get(&id) {
+            if !def.ready {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": false,
+                        "error": "Service is not ready. Please upload a binary first."
+                    })),
+                )
+                    .into_response();
+            }
+        } else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "Service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let service_exists = node
         .manager
         .read()
@@ -143,6 +453,32 @@ async fn stop_service(State(node): State<Node>, Path(id): Path<String>) -> impl 
 }
 
 async fn restart_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    // Check if service is ready
+    {
+        let registry = node.registry.read().await;
+        if let Some(def) = registry.get(&id) {
+            if !def.ready {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": false,
+                        "error": "Service is not ready. Please upload a binary first."
+                    })),
+                )
+                    .into_response();
+            }
+        } else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "Service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let service_exists = node
         .manager
         .read()
@@ -244,6 +580,24 @@ async fn create_service(
             .into_response();
     }
 
+    // Allocate port for the service
+    let port = {
+        let mut port_manager = node.port_manager.write().await;
+        match port_manager.allocate(&def.id) {
+            Ok(p) => p,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "status": false,
+                        "error": format!("failed to allocate port: {}", e)
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
     {
         let mut registry = node.registry.write().await;
 
@@ -270,12 +624,15 @@ async fn create_service(
         }
     }
 
+    let mut env = def.env.clone();
+    env.insert("PORT".to_string(), port.to_string());
+
     let service = Service::new(
         def.id.clone(),
         def.name.clone(),
         def.binary_path.clone(),
         def.args.clone(),
-        def.env.clone(),
+        env,
         def.auto_restart,
         def.restart_limit,
         service_root.clone(),
@@ -289,6 +646,9 @@ async fn create_service(
             let mut registry = node.registry.write().await;
             let _ = registry.remove(&def.id);
             let _ = registry.save();
+
+            let mut port_manager = node.port_manager.write().await;
+            let _ = port_manager.deallocate(&def.id);
 
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -324,6 +684,11 @@ async fn delete_service(State(node): State<Node>, Path(id): Path<String>) -> imp
             )
                 .into_response();
         }
+    }
+
+    {
+        let mut port_manager = node.port_manager.write().await;
+        let _ = port_manager.deallocate(&id);
     }
 
     {
@@ -444,14 +809,49 @@ pub async fn upload_artifact(
         let _ = fs::set_permissions(&binary_path, fs::Permissions::from_mode(0o755));
     }
 
-    // Update symlink: bin/current -> versions/<version>
+    // Get the existing binary name if service is already ready
+    let existing_binary_name = {
+        let registry = node.registry.read().await;
+        registry
+            .get(&id)
+            .filter(|def| def.ready && !def.binary_path.is_empty())
+            .and_then(|def| def.binary_path.split('/').last().map(|s| s.to_string()))
+    };
+
+    // If there's an existing binary name and it's different from uploaded file,
+    // copy the file to use the consistent name
+    let final_binary_name = if let Some(existing_name) = existing_binary_name {
+        if existing_name != file_name {
+            let consistent_path = format!("{}/{}", version_dir, existing_name);
+            if let Err(e) = fs::copy(&binary_path, &consistent_path) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(
+                        json!({"status": false, "error": format!("failed to copy binary: {}", e)}),
+                    ),
+                )
+                    .into_response();
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&consistent_path, fs::Permissions::from_mode(0o755));
+            }
+        }
+        existing_name
+    } else {
+        file_name.clone()
+    };
+
     let current_link = format!("{}/current", bin_dir);
     let _ = fs::remove_file(&current_link);
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        if let Err(e) = symlink(&version_dir, &current_link) {
+        // Use relative symlink: bin/current -> ../versions/{version}
+        let relative_target = format!("../versions/{}", version);
+        if let Err(e) = symlink(&relative_target, &current_link) {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"status": false, "error": e.to_string()})),
@@ -469,14 +869,72 @@ pub async fn upload_artifact(
             .find(|s| s.id == id)
         {
             def.current_version = Some(version.clone());
+
+            // Only set binary_path if not already set (first upload)
+            // This ensures the binary name stays consistent across versions
+            if def.binary_path.is_empty() || !def.ready {
+                let binary_path_relative = format!("bin/current/{}", final_binary_name);
+                def.binary_path = binary_path_relative;
+            }
+            def.ready = true;
         }
 
         let _ = registry.save();
     }
 
-    {
+    // Prepare service struct before acquiring locks
+    let service_to_register = {
+        let manager = node.manager.read().await;
+        let service_exists = manager.list_ids().await.iter().any(|s| s == &id);
+        drop(manager); // Release manager lock early
+
+        let registry = node.registry.read().await;
+        if let Some(def) = registry.get(&id) {
+            let service_root = format!("{}/services/{}", node.config.data_dir, id);
+            let mut env = def.env.clone();
+
+            let port_manager = node.port_manager.read().await;
+            if let Some(port) = port_manager.get_port(&id) {
+                env.insert("PORT".to_string(), port.to_string());
+            }
+            drop(port_manager); // Release port_manager lock
+
+            let service = Service::new(
+                def.id.clone(),
+                def.name.clone(),
+                def.binary_path.clone(),
+                def.args.clone(),
+                env,
+                def.auto_restart,
+                def.restart_limit,
+                service_root,
+            );
+            drop(registry); // Release registry lock
+
+            Some((service, service_exists))
+        } else {
+            drop(registry);
+            None
+        }
+    };
+
+    // Now acquire write lock only once and perform all operations
+    if let Some((service, exists)) = service_to_register {
         let mut manager = node.manager.write().await;
-        let _ = manager.restart(&id).await;
+        if exists {
+            let _ = manager.update_service(service);
+        } else {
+            let _ = manager.register_service(service);
+        }
+
+        // Use timeout for restart to prevent hanging
+        match tokio::time::timeout(tokio::time::Duration::from_secs(30), manager.restart(&id)).await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::error!("restart failed: {}", e),
+            Err(_) => tracing::error!("restart timed out after 30s"),
+        }
+        drop(manager); // Explicitly release before responding
     }
 
     (
@@ -633,13 +1091,52 @@ pub async fn install_github_artifact(
         let _ = std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755));
     }
 
+    // Get the existing binary name if service is already ready
+    let existing_binary_name = {
+        let registry = node.registry.read().await;
+        registry
+            .get(&id)
+            .filter(|def| def.ready && !def.binary_path.is_empty())
+            .and_then(|def| def.binary_path.split('/').last().map(|s| s.to_string()))
+    };
+
+    // If there's an existing binary name and it's different from downloaded asset,
+    // copy the file to use the consistent name
+    let final_binary_name = if let Some(existing_name) = existing_binary_name {
+        if existing_name != payload.asset {
+            let consistent_path = format!("{}/{}", version_dir, existing_name);
+            if let Err(e) = std::fs::copy(&binary_path, &consistent_path) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(
+                        json!({"status": false, "error": format!("failed to copy binary: {}", e)}),
+                    ),
+                )
+                    .into_response();
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(
+                    &consistent_path,
+                    std::fs::Permissions::from_mode(0o755),
+                );
+            }
+        }
+        existing_name
+    } else {
+        payload.asset.clone()
+    };
+
     let current_link = format!("{}/current", bin_dir);
     let _ = std::fs::remove_file(&current_link);
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        if let Err(e) = symlink(&version_dir, &current_link) {
+        // Use relative symlink: bin/current -> ../versions/{version}
+        let relative_target = format!("../versions/{}", payload.version);
+        if let Err(e) = symlink(&relative_target, &current_link) {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"status": false, "error": e.to_string()})),
@@ -657,14 +1154,71 @@ pub async fn install_github_artifact(
             .find(|s| s.id == id)
         {
             def.current_version = Some(payload.version.clone());
+
+            // Only set binary_path if not already set (first install)
+            // This ensures the binary name stays consistent across versions
+            if def.binary_path.is_empty() || !def.ready {
+                let binary_path_relative = format!("bin/current/{}", final_binary_name);
+                def.binary_path = binary_path_relative;
+            }
+            def.ready = true;
         }
 
         let _ = registry.save();
     }
 
-    {
+    // Prepare service struct before acquiring locks
+    let service_to_register = {
+        let manager = node.manager.read().await;
+        let service_exists = manager.list_ids().await.iter().any(|s| s == &id);
+        drop(manager); // Release manager lock early
+
+        if service_exists {
+            let registry = node.registry.read().await;
+            if let Some(def) = registry.get(&id) {
+                let service_root = format!("{}/services/{}", node.config.data_dir, id);
+                let mut env = def.env.clone();
+
+                let port_manager = node.port_manager.read().await;
+                if let Some(port) = port_manager.get_port(&id) {
+                    env.insert("PORT".to_string(), port.to_string());
+                }
+                drop(port_manager); // Release port_manager lock
+
+                let service = Service::new(
+                    def.id.clone(),
+                    def.name.clone(),
+                    def.binary_path.clone(),
+                    def.args.clone(),
+                    env,
+                    def.auto_restart,
+                    def.restart_limit,
+                    service_root,
+                );
+                drop(registry); // Release registry lock
+                Some(service)
+            } else {
+                drop(registry);
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    // Now acquire write lock only once and perform all operations
+    if let Some(service) = service_to_register {
         let mut manager = node.manager.write().await;
-        let _ = manager.restart(&id).await;
+        let _ = manager.update_service(service);
+
+        // Use timeout for restart to prevent hanging
+        match tokio::time::timeout(tokio::time::Duration::from_secs(30), manager.restart(&id)).await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::error!("restart failed: {}", e),
+            Err(_) => tracing::error!("restart timed out after 30s"),
+        }
+        drop(manager); // Explicitly release before responding
     }
 
     (
@@ -707,4 +1261,457 @@ pub async fn get_artifact_info(
         "current_version": current_version,
         "available_versions": versions
     }))
+}
+
+#[derive(Serialize)]
+struct ConfigField {
+    key: String,
+    value: String,
+    field_type: String,
+    description: String,
+}
+
+#[derive(Serialize)]
+struct ServiceConfig {
+    has_config: bool,
+    has_template: bool,
+    fields: Vec<ConfigField>,
+}
+
+pub async fn get_service_config(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": false, "error": "service not found"})),
+            )
+                .into_response();
+        }
+    }
+
+    let service_root = format!("{}/services/{}", node.config.data_dir, id);
+    let config_path = format!("{}/config.toml", service_root);
+    let template_path = format!("{}/config.example.toml", service_root);
+
+    let has_template = std::path::Path::new(&template_path).exists();
+    let has_config = std::path::Path::new(&config_path).exists();
+
+    let mut fields = Vec::new();
+
+    if has_template {
+        if let Ok(template_content) = fs::read_to_string(&template_path) {
+            if let Ok(template_toml) = template_content.parse::<toml::Value>() {
+                let current_config = if has_config {
+                    fs::read_to_string(&config_path)
+                        .ok()
+                        .and_then(|c| c.parse::<toml::Value>().ok())
+                } else {
+                    None
+                };
+
+                fields = extract_config_fields(&template_toml, current_config.as_ref());
+            }
+        }
+    }
+
+    Json(json!(ServiceConfig {
+        has_config,
+        has_template,
+        fields,
+    }))
+    .into_response()
+}
+
+fn extract_config_fields(
+    template: &toml::Value,
+    current: Option<&toml::Value>,
+) -> Vec<ConfigField> {
+    let mut fields = Vec::new();
+
+    if let Some(table) = template.as_table() {
+        for (key, value) in table {
+            let description = format!("Configuration for {}", key);
+            let field_type = match value {
+                toml::Value::String(_) => "string",
+                toml::Value::Integer(_) => "integer",
+                toml::Value::Float(_) => "float",
+                toml::Value::Boolean(_) => "boolean",
+                _ => "string",
+            }
+            .to_string();
+
+            let current_value = current
+                .and_then(|c| c.get(key))
+                .map(|v| v.to_string().trim_matches('"').to_string())
+                .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+
+            fields.push(ConfigField {
+                key: key.clone(),
+                value: current_value,
+                field_type,
+                description,
+            });
+        }
+    }
+
+    fields
+}
+
+#[derive(Deserialize)]
+pub struct UpdateConfigRequest {
+    config: HashMap<String, String>,
+}
+
+pub async fn update_service_config(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+    Json(payload): Json<UpdateConfigRequest>,
+) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": false, "error": "service not found"})),
+            )
+                .into_response();
+        }
+    }
+
+    let service_root = format!("{}/services/{}", node.config.data_dir, id);
+    let config_path = format!("{}/config.toml", service_root);
+
+    let mut toml_table = toml::map::Map::new();
+    for (key, value) in payload.config {
+        if let Ok(parsed_value) = value.clone().parse::<toml::Value>() {
+            toml_table.insert(key, parsed_value);
+        } else {
+            toml_table.insert(key, toml::Value::String(value));
+        }
+    }
+
+    let toml_value = toml::Value::Table(toml_table);
+    let toml_string = match toml::to_string_pretty(&toml_value) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": false, "error": e.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = fs::write(&config_path, toml_string) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": false, "error": e.to_string()})),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": true,
+            "message": "Configuration updated. Please restart the service to apply changes."
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CreateTemplateRequest {
+    fields: HashMap<String, TemplateField>,
+}
+
+#[derive(Deserialize)]
+pub struct TemplateField {
+    value: String,
+    field_type: String,
+}
+
+pub async fn create_or_update_template(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+    Json(payload): Json<CreateTemplateRequest>,
+) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": false, "error": "service not found"})),
+            )
+                .into_response();
+        }
+    }
+
+    let service_root = format!("{}/services/{}", node.config.data_dir, id);
+    let template_path = format!("{}/config.example.toml", service_root);
+
+    let mut toml_table = toml::map::Map::new();
+    for (key, field) in payload.fields {
+        let value = match field.field_type.as_str() {
+            "integer" => {
+                if let Ok(i) = field.value.parse::<i64>() {
+                    toml::Value::Integer(i)
+                } else {
+                    toml::Value::String(field.value)
+                }
+            }
+            "float" => {
+                if let Ok(f) = field.value.parse::<f64>() {
+                    toml::Value::Float(f)
+                } else {
+                    toml::Value::String(field.value)
+                }
+            }
+            "boolean" => {
+                if let Ok(b) = field.value.parse::<bool>() {
+                    toml::Value::Boolean(b)
+                } else {
+                    toml::Value::String(field.value)
+                }
+            }
+            _ => toml::Value::String(field.value),
+        };
+        toml_table.insert(key, value);
+    }
+
+    let toml_value = toml::Value::Table(toml_table);
+    let toml_string = match toml::to_string_pretty(&toml_value) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": false, "error": e.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = fs::write(&template_path, toml_string) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": false, "error": e.to_string()})),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": true,
+            "message": "Config template created successfully"
+        })),
+    )
+        .into_response()
+}
+
+pub async fn get_port_allocations(State(node): State<Node>) -> impl IntoResponse {
+    let port_manager = node.port_manager.read().await;
+    let allocations = port_manager.all_allocations();
+
+    Json(json!({
+        "allocations": allocations
+    }))
+}
+
+pub async fn get_logs(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let manager = node.manager.read().await;
+
+    if let Some(service) = manager.list().await.iter().find(|s| s.id == id) {
+        let logs = service.log_buffer.get_all().await;
+        Json(json!({
+            "service": id,
+            "logs": logs
+        }))
+        .into_response()
+    } else {
+        Json(json!({
+            "service": id,
+            "logs": []
+        }))
+        .into_response()
+    }
+}
+
+pub async fn stream_logs(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+) -> Result<
+    Sse<impl futures::Stream<Item = Result<axum::response::sse::Event, Infallible>>>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "service not found"
+                })),
+            ));
+        }
+    }
+
+    let service_opt = {
+        let manager = node.manager.read().await;
+        let services = manager.list_cloned().await;
+        services.into_iter().find(|s| s.id == id)
+    };
+
+    let stream = async_stream::stream! {
+        if let Some(service) = service_opt {
+            let mut last_count = 0;
+            loop {
+                let logs = service.log_buffer.get_all().await;
+
+                for log in logs.iter().skip(last_count) {
+                    let data = serde_json::to_string(&log).unwrap_or_default();
+                    yield Ok::<_, Infallible>(axum::response::sse::Event::default().data(data));
+                }
+
+                last_count = logs.len();
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        } else {
+            loop {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keep-alive"),
+    ))
+}
+
+pub async fn clear_logs(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let manager = node.manager.read().await;
+
+    if let Some(service) = manager.list().await.iter().find(|s| s.id == id) {
+        service.log_buffer.clear().await;
+        Json(json!({
+            "status": true,
+            "message": "Logs cleared"
+        }))
+        .into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "status": false,
+                "error": "service not running"
+            })),
+        )
+            .into_response()
+    }
+}
+
+#[derive(Serialize)]
+pub struct ServiceStats {
+    pub service_id: String,
+    pub cpu_usage: f32,
+    pub memory_mb: f64,
+    pub pid: Option<u32>,
+}
+
+pub async fn get_service_stats(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": false,
+                    "error": "service not found"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let (service_id, pid) = {
+        let manager = node.manager.read().await;
+        let services = manager.list_cloned().await;
+        match services.into_iter().find(|s| s.id == id) {
+            Some(s) => {
+                let pid = s.get_pid().await;
+                (s.id, pid)
+            }
+            None => {
+                return Json(ServiceStats {
+                    service_id: id,
+                    cpu_usage: 0.0,
+                    memory_mb: 0.0,
+                    pid: None,
+                })
+                .into_response();
+            }
+        }
+    };
+
+    if let Some(pid) = pid {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
+            let stats = ServiceStats {
+                service_id: service_id.clone(),
+                cpu_usage: process.cpu_usage(),
+                memory_mb: process.memory() as f64 / 1024.0 / 1024.0,
+                pid: Some(pid),
+            };
+
+            return Json(stats).into_response();
+        }
+    }
+
+    Json(ServiceStats {
+        service_id,
+        cpu_usage: 0.0,
+        memory_mb: 0.0,
+        pid,
+    })
+    .into_response()
 }

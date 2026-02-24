@@ -2,9 +2,13 @@
   import type { ServiceView } from "$lib/types";
   import * as api from "$lib/api";
   import { store } from "$lib/services.svelte";
-  import { toasts } from "$lib/toasts.svelte";
   import { toaster } from "./Toast.svelte";
-  import { PauseIcon, PlayIcon, RefreshCcwIcon } from "lucide-svelte";
+  import {
+    PauseIcon,
+    PlayIcon,
+    RefreshCcwIcon,
+    AlertCircle,
+  } from "lucide-svelte";
 
   let { service }: { service: ServiceView } = $props();
 
@@ -38,7 +42,7 @@
       await store.refresh();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Action failed";
-      toasts.add(msg, "error");
+      toaster.create({ title: msg, type: "error" });
     } finally {
       activeAction = "";
     }
@@ -54,9 +58,19 @@
         </h3>
         <p class="text-xs font-mono opacity-40 truncate">{service.id}</p>
       </div>
-      <span class="badge preset-filled-tertiary-50-950 font-bold">
-        {service.state}
-      </span>
+      <div class="flex items-center gap-2">
+        {#if !service.ready}
+          <span
+            class="badge bg-amber-500/10 text-amber-600 text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1"
+          >
+            <AlertCircle class="w-3 h-3" />
+            Not Ready
+          </span>
+        {/if}
+        <span class="badge preset-filled-tertiary-50-950 font-bold">
+          {service.state}
+        </span>
+      </div>
     </div>
   </a>
 
@@ -74,7 +88,7 @@
   <div class="flex items-center gap-2 flex-wrap">
     <button
       class="flex-1 min-w-20 btn btn-icon-sm preset-filled-primary-500 h-full"
-      disabled={!!activeAction || service.state === "Running"}
+      disabled={!!activeAction || service.state === "Running" || !service.ready}
       onclick={(e) => handleAction("start", e)}
       aria-label="Start service"
     >
@@ -90,7 +104,7 @@
 
     <button
       class="flex-1 min-w-20 h-full btn btn-icon-sm preset-filled"
-      disabled={!!activeAction || service.state === "Stopped"}
+      disabled={!!activeAction || service.state === "Stopped" || !service.ready}
       onclick={(e) => handleAction("stop", e)}
       aria-label="Stop service"
     >
@@ -106,7 +120,7 @@
 
     <button
       class="btn-icon preset-filled"
-      disabled={!!activeAction}
+      disabled={!!activeAction || !service.ready}
       onclick={(e) => handleAction("restart", e)}
       aria-label="Restart service"
     >

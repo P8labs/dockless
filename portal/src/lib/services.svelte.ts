@@ -10,6 +10,7 @@ class ServiceStore {
   services = $state<ServiceInfo[]>([]);
   registry = $state<ServiceDefinition[]>([]);
   health = $state<HealthInfo | null>(null);
+  loading = $state(true);
   private interval: ReturnType<typeof setInterval> | null = null;
 
   get merged(): ServiceView[] {

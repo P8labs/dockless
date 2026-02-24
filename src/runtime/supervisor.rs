@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use tokio::{
+    io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
     sync::broadcast,
-    time::{Duration, sleep},
+    time::{Duration, sleep, timeout},
 };
 use tracing::info;
 
@@ -18,6 +19,43 @@ impl Supervisor {
         Self { child: None }
     }
 
+    /// Gracefully stop the child process
+    async fn graceful_stop(child: &mut Child) {
+        #[cfg(unix)]
+        {
+            // Try SIGTERM first for graceful shutdown
+            if let Some(pid) = child.id() {
+                info!("Sending SIGTERM to PID {}", pid);
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+
+                // Wait up to 5 seconds for graceful shutdown
+                let wait_result = timeout(Duration::from_secs(5), child.wait()).await;
+
+                match wait_result {
+                    Ok(Ok(status)) => {
+                        info!("Process {} exited gracefully with status: {}", pid, status);
+                        return;
+                    }
+                    Ok(Err(e)) => {
+                        info!("Error waiting for process {}: {}", pid, e);
+                    }
+                    Err(_) => {
+                        info!(
+                            "Process {} did not exit after SIGTERM, sending SIGKILL",
+                            pid
+                        );
+                    }
+                }
+            }
+        }
+
+        // If SIGTERM didn't work or we're not on Unix, use kill
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+
     pub async fn run_supervised(
         &mut self,
         service: Service,
@@ -26,8 +64,28 @@ impl Supervisor {
     ) -> Result<()> {
         let mut restart_count = 0;
         loop {
-            info!("starting child process: {}", service.binary_path);
+            info!(
+                "starting child process: {} from working_dir: {}",
+                service.binary_path, service.working_dir
+            );
             service.set_state(ServiceState::Starting).await;
+
+            let full_binary_path =
+                std::path::Path::new(&service.working_dir).join(&service.binary_path);
+            if !full_binary_path.exists() {
+                let err_msg = format!(
+                    "Binary not found at: {} (resolved to: {})",
+                    service.binary_path,
+                    full_binary_path.display()
+                );
+                tracing::error!("{}", err_msg);
+                service.set_state(ServiceState::Failed).await;
+                service
+                    .log_buffer
+                    .push("error".to_string(), err_msg.clone())
+                    .await;
+                anyhow::bail!("{}", err_msg);
+            }
 
             let mut cmd = Command::new(&service.binary_path);
             cmd.args(&service.args);
@@ -36,13 +94,55 @@ impl Supervisor {
                 cmd.env(k, v);
             }
 
-            let child = cmd
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .with_context(|| {
-                    format!("failed to spawn child process at {}", service.binary_path)
-                })?;
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("failed to spawn child process: {}", e);
+                    service.set_state(ServiceState::Failed).await;
+                    service
+                        .log_buffer
+                        .push("error".to_string(), format!("Failed to start: {}", e))
+                        .await;
+                    anyhow::bail!(
+                        "failed to spawn child process at {}: {}",
+                        service.binary_path,
+                        e
+                    );
+                }
+            };
+
+            if let Some(pid) = child.id() {
+                service.set_pid(Some(pid)).await;
+            }
+
+            if let Some(stdout) = child.stdout.take() {
+                let log_buffer = service.log_buffer.clone();
+                let service_id = service.id.clone();
+                tokio::spawn(async move {
+                    let reader = BufReader::new(stdout);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        log_buffer.push("info".to_string(), line).await;
+                    }
+                    info!("[{}] stdout reader finished", service_id);
+                });
+            }
+
+            if let Some(stderr) = child.stderr.take() {
+                let log_buffer = service.log_buffer.clone();
+                let service_id = service.id.clone();
+                tokio::spawn(async move {
+                    let reader = BufReader::new(stderr);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        log_buffer.push("error".to_string(), line).await;
+                    }
+                    info!("[{}] stderr reader finished", service_id);
+                });
+            }
+
             self.child = Some(child);
 
             service.set_state(ServiceState::Running).await;
@@ -64,10 +164,10 @@ impl Supervisor {
                     service.set_state(ServiceState::Stopping).await;
 
                     if let Some(child) = &mut self.child {
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
+                        Self::graceful_stop(child).await;
                     }
 
+                    service.set_pid(None).await;
                     service.set_state(ServiceState::Stopped).await;
                     break;
                 }
@@ -77,10 +177,10 @@ impl Supervisor {
                     service.set_state(ServiceState::Stopping).await;
 
                     if let Some(child) = &mut self.child {
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
+                        Self::graceful_stop(child).await;
                     }
 
+                    service.set_pid(None).await;
                     service.set_state(ServiceState::Stopped).await;
                     break;
                 }
@@ -91,6 +191,7 @@ impl Supervisor {
                     info!("[{}] child exited with status: {}", service.id, status);
 
                     self.child = None;
+                    service.set_pid(None).await;
 
                     if global_shutdown_rx.try_recv().is_ok() ||
                        service_shutdown_rx.try_recv().is_ok() {

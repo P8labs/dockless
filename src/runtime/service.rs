@@ -2,6 +2,8 @@ use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
+use super::log_buffer::LogBuffer;
+
 #[derive(Debug, Clone, Serialize)]
 pub enum ServiceState {
     Starting,
@@ -26,6 +28,8 @@ pub struct Service {
     pub working_dir: String,
 
     pub state: Arc<RwLock<ServiceState>>,
+    pub log_buffer: LogBuffer,
+    pub pid: Arc<RwLock<Option<u32>>>,
 }
 
 impl Service {
@@ -49,6 +53,8 @@ impl Service {
             restart_limit,
             working_dir,
             state: Arc::new(RwLock::new(ServiceState::Stopped)),
+            log_buffer: LogBuffer::new(),
+            pid: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -59,5 +65,14 @@ impl Service {
 
     pub async fn get_state(&self) -> ServiceState {
         self.state.read().await.clone()
+    }
+
+    pub async fn get_pid(&self) -> Option<u32> {
+        *self.pid.read().await
+    }
+
+    pub async fn set_pid(&self, new_pid: Option<u32>) {
+        let mut pid = self.pid.write().await;
+        *pid = new_pid;
     }
 }

@@ -13,6 +13,11 @@ struct RegistryFile {
 pub struct ServiceDefinition {
     pub id: String,
     pub name: String,
+
+    #[serde(default)]
+    pub ready: bool,
+
+    #[serde(default)]
     pub binary_path: String,
 
     #[serde(default)]
@@ -29,6 +34,9 @@ pub struct ServiceDefinition {
 
     #[serde(default)]
     pub current_version: Option<String>,
+
+    #[serde(skip)]
+    pub port: Option<u16>,
 }
 
 fn default_auto_restart() -> bool {
@@ -84,11 +92,24 @@ impl RegistryManager {
 
     pub fn add(&mut self, def: ServiceDefinition) -> Result<()> {
         if self.definitions.iter().any(|s| s.id == def.id) {
-            anyhow::bail!("service {} already exists", def.id);
+            anyhow::bail!("service {} already exists with port {:?}", def.id, def.port);
         }
 
         self.definitions.push(def);
         Ok(())
+    }
+
+    pub fn update(&mut self, id: &str, def: ServiceDefinition) -> Result<()> {
+        if let Some(existing) = self.definitions.iter_mut().find(|s| s.id == id) {
+            *existing = def;
+            Ok(())
+        } else {
+            anyhow::bail!("service {} not found", id);
+        }
+    }
+
+    pub fn get(&self, id: &str) -> Option<&ServiceDefinition> {
+        self.definitions.iter().find(|s| s.id == id)
     }
 
     pub fn remove(&mut self, id: &str) -> Result<()> {

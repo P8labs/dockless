@@ -1,8 +1,8 @@
 <script lang="ts">
   import { AppBar } from "@skeletonlabs/skeleton-svelte";
   import { store } from "$lib/services.svelte";
-  import { toasts } from "$lib/toasts.svelte";
   import { formatUptime } from "$lib/utils";
+  import { toaster } from "./Toast.svelte";
 
   const health = $derived(store.health);
 </script>
@@ -22,7 +22,7 @@
           title="Click to copy Node Id"
           onclick={() => {
             navigator.clipboard.writeText(health.node_id);
-            toasts.add("Node ID copied to clipboard", "success");
+            toaster.info({ title: "Node ID copied to clipboard" });
           }}
           >{health.node_id.slice(0, 8)}...
         </button>
