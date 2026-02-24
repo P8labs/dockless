@@ -39,3 +39,9 @@
 - [x] Service creation in parts.
 - [x] Add streaming logs view in portal
 - [x] Add system usage service specific
+- [x] fixed some UI bugs and add more details appbar
+- [x] offload the logs from memory to disk saving RAM
+- [x] Fixed service config template and real values bug
+- [x] deallocating and killing the service from port.
+- [x] addes settings page to edit the service definations
+- [x] add option to refresh and clean logs

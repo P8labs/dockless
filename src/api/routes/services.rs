@@ -43,6 +43,10 @@ pub fn routes() -> Router<Node> {
             "/services/{id}/config/template",
             post(create_or_update_template),
         )
+        .route(
+            "/services/{id}/config/template",
+            delete(delete_config_template),
+        )
         .route("/services/ports", get(get_port_allocations))
         .route("/services/{id}/logs", get(get_logs))
         .route("/services/{id}/logs/stream", get(stream_logs))
@@ -100,7 +104,6 @@ async fn init_service(
             .into_response();
     }
 
-    // Generate ID from name if not provided
     let id = req.id.unwrap_or_else(|| {
         req.name
             .to_lowercase()
@@ -169,7 +172,6 @@ async fn init_service(
         }
     }
 
-    // Allocate port for the service
     {
         let mut port_manager = node.port_manager.write().await;
         if let Err(e) = port_manager.allocate(&id) {
@@ -213,13 +215,11 @@ async fn get_service(State(node): State<Node>, Path(id): Path<String>) -> impl I
         }
     };
 
-    // Get the port for this service
     let port = {
         let port_manager = node.port_manager.read().await;
         port_manager.get_port(&id)
     };
 
-    // Construct response with port included
     let mut response = json!({
         "id": def.id,
         "name": def.name,
@@ -313,7 +313,6 @@ async fn configure_service(
 }
 
 async fn start_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
-    // Check if service is ready
     {
         let registry = node.registry.read().await;
         if let Some(def) = registry.get(&id) {
@@ -383,7 +382,6 @@ async fn start_service(State(node): State<Node>, Path(id): Path<String>) -> impl
 }
 
 async fn stop_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
-    // Check if service is ready
     {
         let registry = node.registry.read().await;
         if let Some(def) = registry.get(&id) {
@@ -453,7 +451,6 @@ async fn stop_service(State(node): State<Node>, Path(id): Path<String>) -> impl 
 }
 
 async fn restart_service(State(node): State<Node>, Path(id): Path<String>) -> impl IntoResponse {
-    // Check if service is ready
     {
         let registry = node.registry.read().await;
         if let Some(def) = registry.get(&id) {
@@ -580,7 +577,6 @@ async fn create_service(
             .into_response();
     }
 
-    // Allocate port for the service
     let port = {
         let mut port_manager = node.port_manager.write().await;
         match port_manager.allocate(&def.id) {
@@ -634,7 +630,7 @@ async fn create_service(
         def.args.clone(),
         env,
         def.auto_restart,
-        def.restart_limit,
+        def.restart_limit.or(Some(3)),
         service_root.clone(),
     );
 
@@ -809,7 +805,6 @@ pub async fn upload_artifact(
         let _ = fs::set_permissions(&binary_path, fs::Permissions::from_mode(0o755));
     }
 
-    // Get the existing binary name if service is already ready
     let existing_binary_name = {
         let registry = node.registry.read().await;
         registry
@@ -818,8 +813,6 @@ pub async fn upload_artifact(
             .and_then(|def| def.binary_path.split('/').last().map(|s| s.to_string()))
     };
 
-    // If there's an existing binary name and it's different from uploaded file,
-    // copy the file to use the consistent name
     let final_binary_name = if let Some(existing_name) = existing_binary_name {
         if existing_name != file_name {
             let consistent_path = format!("{}/{}", version_dir, existing_name);
@@ -849,7 +842,6 @@ pub async fn upload_artifact(
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        // Use relative symlink: bin/current -> ../versions/{version}
         let relative_target = format!("../versions/{}", version);
         if let Err(e) = symlink(&relative_target, &current_link) {
             return (
@@ -870,8 +862,6 @@ pub async fn upload_artifact(
         {
             def.current_version = Some(version.clone());
 
-            // Only set binary_path if not already set (first upload)
-            // This ensures the binary name stays consistent across versions
             if def.binary_path.is_empty() || !def.ready {
                 let binary_path_relative = format!("bin/current/{}", final_binary_name);
                 def.binary_path = binary_path_relative;
@@ -882,11 +872,10 @@ pub async fn upload_artifact(
         let _ = registry.save();
     }
 
-    // Prepare service struct before acquiring locks
     let service_to_register = {
         let manager = node.manager.read().await;
         let service_exists = manager.list_ids().await.iter().any(|s| s == &id);
-        drop(manager); // Release manager lock early
+        drop(manager);
 
         let registry = node.registry.read().await;
         if let Some(def) = registry.get(&id) {
@@ -897,7 +886,7 @@ pub async fn upload_artifact(
             if let Some(port) = port_manager.get_port(&id) {
                 env.insert("PORT".to_string(), port.to_string());
             }
-            drop(port_manager); // Release port_manager lock
+            drop(port_manager);
 
             let service = Service::new(
                 def.id.clone(),
@@ -909,7 +898,7 @@ pub async fn upload_artifact(
                 def.restart_limit,
                 service_root,
             );
-            drop(registry); // Release registry lock
+            drop(registry);
 
             Some((service, service_exists))
         } else {
@@ -918,7 +907,6 @@ pub async fn upload_artifact(
         }
     };
 
-    // Now acquire write lock only once and perform all operations
     if let Some((service, exists)) = service_to_register {
         let mut manager = node.manager.write().await;
         if exists {
@@ -927,14 +915,13 @@ pub async fn upload_artifact(
             let _ = manager.register_service(service);
         }
 
-        // Use timeout for restart to prevent hanging
         match tokio::time::timeout(tokio::time::Duration::from_secs(30), manager.restart(&id)).await
         {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => tracing::error!("restart failed: {}", e),
             Err(_) => tracing::error!("restart timed out after 30s"),
         }
-        drop(manager); // Explicitly release before responding
+        drop(manager);
     }
 
     (
@@ -1091,7 +1078,6 @@ pub async fn install_github_artifact(
         let _ = std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755));
     }
 
-    // Get the existing binary name if service is already ready
     let existing_binary_name = {
         let registry = node.registry.read().await;
         registry
@@ -1100,8 +1086,6 @@ pub async fn install_github_artifact(
             .and_then(|def| def.binary_path.split('/').last().map(|s| s.to_string()))
     };
 
-    // If there's an existing binary name and it's different from downloaded asset,
-    // copy the file to use the consistent name
     let final_binary_name = if let Some(existing_name) = existing_binary_name {
         if existing_name != payload.asset {
             let consistent_path = format!("{}/{}", version_dir, existing_name);
@@ -1134,7 +1118,6 @@ pub async fn install_github_artifact(
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        // Use relative symlink: bin/current -> ../versions/{version}
         let relative_target = format!("../versions/{}", payload.version);
         if let Err(e) = symlink(&relative_target, &current_link) {
             return (
@@ -1155,8 +1138,6 @@ pub async fn install_github_artifact(
         {
             def.current_version = Some(payload.version.clone());
 
-            // Only set binary_path if not already set (first install)
-            // This ensures the binary name stays consistent across versions
             if def.binary_path.is_empty() || !def.ready {
                 let binary_path_relative = format!("bin/current/{}", final_binary_name);
                 def.binary_path = binary_path_relative;
@@ -1167,58 +1148,56 @@ pub async fn install_github_artifact(
         let _ = registry.save();
     }
 
-    // Prepare service struct before acquiring locks
     let service_to_register = {
         let manager = node.manager.read().await;
         let service_exists = manager.list_ids().await.iter().any(|s| s == &id);
-        drop(manager); // Release manager lock early
+        drop(manager);
 
-        if service_exists {
-            let registry = node.registry.read().await;
-            if let Some(def) = registry.get(&id) {
-                let service_root = format!("{}/services/{}", node.config.data_dir, id);
-                let mut env = def.env.clone();
+        let registry = node.registry.read().await;
+        if let Some(def) = registry.get(&id) {
+            let service_root = format!("{}/services/{}", node.config.data_dir, id);
+            let mut env = def.env.clone();
 
-                let port_manager = node.port_manager.read().await;
-                if let Some(port) = port_manager.get_port(&id) {
-                    env.insert("PORT".to_string(), port.to_string());
-                }
-                drop(port_manager); // Release port_manager lock
-
-                let service = Service::new(
-                    def.id.clone(),
-                    def.name.clone(),
-                    def.binary_path.clone(),
-                    def.args.clone(),
-                    env,
-                    def.auto_restart,
-                    def.restart_limit,
-                    service_root,
-                );
-                drop(registry); // Release registry lock
-                Some(service)
-            } else {
-                drop(registry);
-                None
+            let port_manager = node.port_manager.read().await;
+            if let Some(port) = port_manager.get_port(&id) {
+                env.insert("PORT".to_string(), port.to_string());
             }
+            drop(port_manager);
+
+            let service = Service::new(
+                def.id.clone(),
+                def.name.clone(),
+                def.binary_path.clone(),
+                def.args.clone(),
+                env,
+                def.auto_restart,
+                def.restart_limit,
+                service_root,
+            );
+            drop(registry);
+
+            Some((service, service_exists))
         } else {
+            drop(registry);
             None
         }
     };
 
-    // Now acquire write lock only once and perform all operations
-    if let Some(service) = service_to_register {
+    if let Some((service, exists)) = service_to_register {
         let mut manager = node.manager.write().await;
-        let _ = manager.update_service(service);
+        if exists {
+            let _ = manager.update_service(service);
+        } else {
+            let _ = manager.register_service(service);
+        }
 
-        // Use timeout for restart to prevent hanging
         match tokio::time::timeout(tokio::time::Duration::from_secs(30), manager.restart(&id)).await
         {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => tracing::error!("restart failed: {}", e),
             Err(_) => tracing::error!("restart timed out after 30s"),
         }
-        drop(manager); // Explicitly release before responding
+        drop(manager);
     }
 
     (
@@ -1301,19 +1280,58 @@ pub async fn get_service_config(
     let has_config = std::path::Path::new(&config_path).exists();
 
     let mut fields = Vec::new();
-
     if has_template {
         if let Ok(template_content) = fs::read_to_string(&template_path) {
-            if let Ok(template_toml) = template_content.parse::<toml::Value>() {
+            if let Ok(template_toml) = toml::from_str(&template_content) {
                 let current_config = if has_config {
                     fs::read_to_string(&config_path)
                         .ok()
-                        .and_then(|c| c.parse::<toml::Value>().ok())
+                        .and_then(|c| toml::from_str(&c).ok())
                 } else {
                     None
                 };
 
                 fields = extract_config_fields(&template_toml, current_config.as_ref());
+            }
+        }
+    } else if has_config {
+        if let Ok(config_content) = fs::read_to_string(&config_path) {
+            if let Ok(config_toml) = toml::from_str(&config_content) {
+                fn flatten(
+                    prefix: Option<String>,
+                    value: &toml::Value,
+                    out: &mut Vec<ConfigField>,
+                ) {
+                    if let Some(table) = value.as_table() {
+                        for (k, v) in table {
+                            let key = match &prefix {
+                                Some(p) => format!("{}.{}", p, k),
+                                None => k.clone(),
+                            };
+                            match v {
+                                toml::Value::Table(_) => flatten(Some(key), v, out),
+                                _ => {
+                                    let field_type = match v {
+                                        toml::Value::String(_) => "string",
+                                        toml::Value::Integer(_) => "integer",
+                                        toml::Value::Float(_) => "float",
+                                        toml::Value::Boolean(_) => "boolean",
+                                        _ => "string",
+                                    }
+                                    .to_string();
+                                    out.push(ConfigField {
+                                        key,
+                                        value: v.to_string().trim_matches('"').to_string(),
+                                        field_type,
+                                        description: String::new(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                flatten(None, &config_toml, &mut fields);
             }
         }
     }
@@ -1335,22 +1353,88 @@ fn extract_config_fields(
     if let Some(table) = template.as_table() {
         for (key, value) in table {
             let description = format!("Configuration for {}", key);
-            let field_type = match value {
+            if key.contains('.') {
+                let field_type = match value {
+                    toml::Value::String(_) => "string",
+                    toml::Value::Integer(_) => "integer",
+                    toml::Value::Float(_) => "float",
+                    toml::Value::Boolean(_) => "boolean",
+                    _ => "string",
+                }
+                .to_string();
+                let current_value = get_value_by_path(current, &key)
+                    .map(|v| v.to_string().trim_matches('"').to_string())
+                    .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+                fields.push(ConfigField {
+                    key: key.clone(),
+                    value: current_value,
+                    field_type,
+                    description,
+                });
+            } else {
+                match value {
+                    toml::Value::Table(_) => {
+                        let nested_fields = extract_nested_fields(key, value, current);
+                        fields.extend(nested_fields);
+                    }
+                    _ => {
+                        let field_type = match value {
+                            toml::Value::String(_) => "string",
+                            toml::Value::Integer(_) => "integer",
+                            toml::Value::Float(_) => "float",
+                            toml::Value::Boolean(_) => "boolean",
+                            _ => "string",
+                        }
+                        .to_string();
+                        let current_value = get_value_by_path(current, key)
+                            .map(|v| v.to_string().trim_matches('"').to_string())
+                            .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+                        fields.push(ConfigField {
+                            key: key.clone(),
+                            value: current_value,
+                            field_type,
+                            description,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+fn extract_nested_fields(
+    parent_key: &str,
+    value: &toml::Value,
+    current: Option<&toml::Value>,
+) -> Vec<ConfigField> {
+    let mut fields = Vec::new();
+
+    if let Some(table) = value.as_table() {
+        for (key, val) in table {
+            let full_key = format!("{}.{}", parent_key, key);
+            let description = format!("Configuration for {}", key);
+            let field_type = match val {
                 toml::Value::String(_) => "string",
                 toml::Value::Integer(_) => "integer",
                 toml::Value::Float(_) => "float",
                 toml::Value::Boolean(_) => "boolean",
+                toml::Value::Table(_) => {
+                    let nested = extract_nested_fields(&full_key, val, current);
+                    fields.extend(nested);
+                    continue;
+                }
                 _ => "string",
             }
             .to_string();
 
-            let current_value = current
-                .and_then(|c| c.get(key))
+            let current_value = get_value_by_path(current, &full_key)
                 .map(|v| v.to_string().trim_matches('"').to_string())
-                .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+                .unwrap_or_else(|| val.to_string().trim_matches('"').to_string());
 
             fields.push(ConfigField {
-                key: key.clone(),
+                key: full_key,
                 value: current_value,
                 field_type,
                 description,
@@ -1359,6 +1443,20 @@ fn extract_config_fields(
     }
 
     fields
+}
+
+fn get_value_by_path<'a>(
+    toml_value: Option<&'a toml::Value>,
+    path: &str,
+) -> Option<&'a toml::Value> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = toml_value?;
+
+    for part in parts {
+        current = current.get(part)?;
+    }
+
+    Some(current)
 }
 
 #[derive(Deserialize)]
@@ -1386,11 +1484,17 @@ pub async fn update_service_config(
     let config_path = format!("{}/config.toml", service_root);
 
     let mut toml_table = toml::map::Map::new();
+
     for (key, value) in payload.config {
-        if let Ok(parsed_value) = value.clone().parse::<toml::Value>() {
-            toml_table.insert(key, parsed_value);
+        let parts: Vec<&str> = key.split('.').collect();
+        if parts.len() == 1 {
+            if let Ok(parsed_value) = toml::from_str(&value) {
+                toml_table.insert(key, parsed_value);
+            } else {
+                toml_table.insert(key, toml::Value::String(value));
+            }
         } else {
-            toml_table.insert(key, toml::Value::String(value));
+            insert_nested_value(&mut toml_table, &parts, &value);
         }
     }
 
@@ -1422,6 +1526,42 @@ pub async fn update_service_config(
         })),
     )
         .into_response()
+}
+
+fn insert_nested_value(
+    table: &mut toml::map::Map<String, toml::Value>,
+    parts: &[&str],
+    value: &str,
+) {
+    if parts.is_empty() {
+        return;
+    }
+
+    if parts.len() == 1 {
+        let parsed_value = if let Ok(i) = value.parse::<i64>() {
+            toml::Value::Integer(i)
+        } else if let Ok(f) = value.parse::<f64>() {
+            toml::Value::Float(f)
+        } else if let Ok(b) = value.parse::<bool>() {
+            toml::Value::Boolean(b)
+        } else {
+            toml::Value::String(value.to_string())
+        };
+
+        table.insert(parts[0].to_string(), parsed_value);
+    } else {
+        let section = parts[0];
+        let remaining = &parts[1..];
+
+        let nested_table = table
+            .entry(section.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut();
+
+        if let Some(nested) = nested_table {
+            insert_nested_value(nested, remaining, value);
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1513,6 +1653,52 @@ pub async fn create_or_update_template(
         .into_response()
 }
 
+pub async fn delete_config_template(
+    State(node): State<Node>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    {
+        let registry = node.registry.read().await;
+        if !registry.list_definitions().iter().any(|s| s.id == id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": false, "error": "service not found"})),
+            )
+                .into_response();
+        }
+    }
+
+    let service_root = format!("{}/services/{}", node.config.data_dir, id);
+    let template_path = format!("{}/config.example.toml", service_root);
+
+    // Check if template exists
+    if !std::path::Path::new(&template_path).exists() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status": false, "error": "template not found"})),
+        )
+            .into_response();
+    }
+
+    // Delete the template file
+    if let Err(e) = fs::remove_file(&template_path) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": false, "error": e.to_string()})),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": true,
+            "message": "Config template deleted successfully"
+        })),
+    )
+        .into_response()
+}
+
 pub async fn get_port_allocations(State(node): State<Node>) -> impl IntoResponse {
     let port_manager = node.port_manager.read().await;
     let allocations = port_manager.all_allocations();
@@ -1585,7 +1771,7 @@ pub async fn stream_logs(
         if let Some(service) = service_opt {
             let mut last_count = 0;
             loop {
-                let logs = service.log_buffer.get_all().await;
+                let logs = service.log_buffer.get_recent().await;
 
                 for log in logs.iter().skip(last_count) {
                     let data = serde_json::to_string(&log).unwrap_or_default();
@@ -1627,12 +1813,21 @@ pub async fn clear_logs(State(node): State<Node>, Path(id): Path<String>) -> imp
     let manager = node.manager.read().await;
 
     if let Some(service) = manager.list().await.iter().find(|s| s.id == id) {
-        service.log_buffer.clear().await;
-        Json(json!({
-            "status": true,
-            "message": "Logs cleared"
-        }))
-        .into_response()
+        match service.log_buffer.clear().await {
+            Ok(_) => Json(json!({
+                "status": true,
+                "message": "Logs cleared"
+            }))
+            .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "status": false,
+                    "error": format!("Failed to clear logs: {}", e)
+                })),
+            )
+                .into_response(),
+        }
     } else {
         (
             StatusCode::NOT_FOUND,

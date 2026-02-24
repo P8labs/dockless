@@ -14,6 +14,7 @@ pub struct SupervisorManager {
     services: HashMap<String, Service>,
     supervisors: HashMap<String, SupervisorHandle>,
     shutdown_tx: broadcast::Sender<()>,
+    port_manager: Option<crate::platform::port_manager::PortManager>,
 }
 
 impl SupervisorManager {
@@ -23,6 +24,7 @@ impl SupervisorManager {
             services: HashMap::new(),
             supervisors: HashMap::new(),
             shutdown_tx,
+            port_manager: None,
         }
     }
 
@@ -38,6 +40,9 @@ impl SupervisorManager {
     pub fn unregister_service(&mut self, id: &str) -> anyhow::Result<()> {
         if self.services.remove(id).is_none() {
             anyhow::bail!("service {} not registered", id);
+        }
+        if let Some(pm) = self.port_manager.as_mut() {
+            let _ = pm.deallocate(id);
         }
         Ok(())
     }
@@ -100,13 +105,40 @@ impl SupervisorManager {
         if let Some(handle) = self.supervisors.remove(id) {
             let _ = handle.shutdown_tx.send(());
 
-            // Add timeout to prevent hanging forever on join
+            // Try to kill the process if running
+            if let Some(service) = self.services.get(id) {
+                let pid = service.pid.read().await.clone();
+                if let Some(pid) = pid {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGTERM);
+                    }
+                    // Wait a bit for graceful exit
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    // If still running, force kill
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
+                    }
+                }
+            }
+
             match tokio::time::timeout(tokio::time::Duration::from_secs(30), handle.join_handle)
                 .await
             {
-                Ok(_) => Ok(()),
+                Ok(_) => {
+                    // Deallocate port
+                    if let Some(pm) = self.port_manager.as_mut() {
+                        let _ = pm.deallocate(id);
+                    }
+                    Ok(())
+                }
                 Err(_) => {
                     tracing::warn!("[{}] supervisor failed to stop within timeout", id);
+                    // Deallocate port anyway
+                    if let Some(pm) = self.port_manager.as_mut() {
+                        let _ = pm.deallocate(id);
+                    }
                     Ok(())
                 }
             }
@@ -158,7 +190,6 @@ impl SupervisorManager {
 
         let handles: Vec<_> = self.supervisors.drain().collect();
 
-        // Use timeout for each supervisor shutdown
         for (id, handle) in handles {
             match tokio::time::timeout(tokio::time::Duration::from_secs(30), handle.join_handle)
                 .await

@@ -15,7 +15,7 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "dockless=trace,tower_http=trace".into()),
+                .unwrap_or_else(|_| "dockless=trace,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -42,7 +42,6 @@ async fn run() -> anyhow::Result<()> {
     api::server::start_api(&node).await?;
     info!("dockless shutting down");
 
-    // Add timeout to shutdown to prevent hanging on Ctrl+C
     let shutdown_future = async {
         node.manager.write().await.shutdown_all().await;
     };

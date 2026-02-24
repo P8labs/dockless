@@ -1,15 +1,19 @@
 <script lang="ts">
   import type { LogEntry } from "$lib/types";
-  import { Trash2 } from "lucide-svelte";
+  import { Trash2, RefreshCw } from "lucide-svelte";
 
   let {
     logs,
     onClear,
     onClearPermanent,
+    onRefresh,
+    refreshing = false,
   }: {
     logs: LogEntry[];
     onClear: () => void;
     onClearPermanent: () => void;
+    onRefresh: () => void;
+    refreshing?: boolean;
   } = $props();
 
   function formatTimestamp(iso: string): string {
@@ -41,6 +45,15 @@
     </p>
     <div class="flex items-center gap-2">
       <button
+        class="text-sm font-medium btn preset-tonal inline-flex items-center gap-2"
+        onclick={onRefresh}
+        disabled={refreshing}
+        title="Fetch latest logs from file"
+      >
+        <RefreshCw class="w-4 h-4 {refreshing ? 'animate-spin' : ''}" />
+        Refresh
+      </button>
+      <button
         class="text-sm font-medium btn preset-tonal"
         onclick={onClear}
         disabled={logs.length === 0}
@@ -52,7 +65,7 @@
         class="text-sm font-medium btn preset-outlined-error inline-flex items-center gap-2"
         onclick={onClearPermanent}
         disabled={logs.length === 0}
-        title="Permanently clear logs from service"
+        title="Permanently clear logs from service file"
       >
         <Trash2 class="w-4 h-4" />
         Clear Permanently

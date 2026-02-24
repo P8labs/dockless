@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 
 use super::log_buffer::LogBuffer;
@@ -43,6 +43,7 @@ impl Service {
         restart_limit: Option<u32>,
         working_dir: String,
     ) -> Self {
+        let log_file = PathBuf::from(&working_dir).join("logs").join("service.log");
         Self {
             id,
             name,
@@ -53,7 +54,7 @@ impl Service {
             restart_limit,
             working_dir,
             state: Arc::new(RwLock::new(ServiceState::Stopped)),
-            log_buffer: LogBuffer::new(),
+            log_buffer: LogBuffer::new(log_file),
             pid: Arc::new(RwLock::new(None)),
         }
     }

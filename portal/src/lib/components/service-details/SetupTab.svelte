@@ -35,7 +35,6 @@
   </div>
 
   <div class="space-y-6">
-    <!-- Version Upload Section -->
     <div class="card bg-surface-100-800 p-6">
       <div class="flex items-center gap-2 mb-4">
         <Upload class="w-5 h-5" />
@@ -85,7 +84,6 @@
       </div>
     </div>
 
-    <!-- GitHub Install Section -->
     <div class="card bg-surface-100-800 p-6">
       <div class="flex items-center gap-2 mb-4">
         <Github class="w-5 h-5" />

@@ -19,18 +19,15 @@ impl Supervisor {
         Self { child: None }
     }
 
-    /// Gracefully stop the child process
     async fn graceful_stop(child: &mut Child) {
         #[cfg(unix)]
         {
-            // Try SIGTERM first for graceful shutdown
             if let Some(pid) = child.id() {
                 info!("Sending SIGTERM to PID {}", pid);
                 unsafe {
                     libc::kill(pid as i32, libc::SIGTERM);
                 }
 
-                // Wait up to 5 seconds for graceful shutdown
                 let wait_result = timeout(Duration::from_secs(5), child.wait()).await;
 
                 match wait_result {
@@ -51,7 +48,6 @@ impl Supervisor {
             }
         }
 
-        // If SIGTERM didn't work or we're not on Unix, use kill
         let _ = child.kill().await;
         let _ = child.wait().await;
     }
@@ -208,7 +204,6 @@ impl Supervisor {
                     if !service.auto_restart {
                         break;
                     }
-
 
                     if let Some(limit) = service.restart_limit {
                         if restart_count >= limit {

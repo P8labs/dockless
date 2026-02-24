@@ -30,8 +30,10 @@ class ServiceStore {
       this.services = services;
       this.registry = registry;
       this.health = health;
+      this.loading = false;
     } catch (e) {
       console.error("Failed to refresh:", e);
+      this.loading = false;
     }
   }
 

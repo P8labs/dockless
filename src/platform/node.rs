@@ -35,7 +35,6 @@ impl Node {
         let mut manager = SupervisorManager::new();
 
         for def in definitions {
-            // Skip services that are not ready
             if !def.ready {
                 continue;
             }
@@ -54,7 +53,6 @@ impl Node {
 
             let mut env = def.env.clone();
 
-            // Allocate port if not already allocated
             let port = port_manager.allocate(&def.id)?;
             env.insert("PORT".to_string(), port.to_string());
 

@@ -15,7 +15,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.message || `Request failed: ${res.status}`);
+    throw new Error(
+      data.error || data.message || `Request failed: ${res.status}`,
+    );
   }
   return data as T;
 }
@@ -146,6 +148,12 @@ export async function createConfigTemplate(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fields }),
+  });
+}
+
+export async function deleteConfigTemplate(id: string): Promise<ApiResponse> {
+  return request(`/services/${id}/config/template`, {
+    method: "DELETE",
   });
 }
 

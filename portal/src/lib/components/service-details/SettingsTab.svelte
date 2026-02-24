@@ -56,14 +56,12 @@
 
   function handleSave() {
     try {
-      // Validate and build environment variables
       const env: Record<string, string> = {};
       const envVarPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
       for (const { key, value } of envVars) {
         const trimmedKey = (key || "").trim();
         if (trimmedKey) {
-          // Validate environment variable name
           if (!envVarPattern.test(trimmedKey)) {
             throw new Error(
               `Invalid environment variable name: "${trimmedKey}". ` +
@@ -74,7 +72,6 @@
         }
       }
 
-      // Parse restart limit safely
       let limit: number | null = null;
       const limitStr = String(restartLimit || "").trim();
       if (limitStr) {
@@ -86,7 +83,6 @@
         }
       }
 
-      // Validate args - ensure they're not empty strings
       const validArgs = args
         .map((arg) => (arg || "").trim())
         .filter((arg) => arg.length > 0);
@@ -99,7 +95,6 @@
       });
     } catch (error) {
       console.error("Error saving settings:", error);
-      // Re-throw to let parent component handle the error display
       throw error;
     }
   }
@@ -135,7 +130,6 @@
       step="1"
       class="input w-full max-w-xs"
       oninput={(e) => {
-        // Ensure only valid numbers
         const value = e.currentTarget.value;
         if (value && (isNaN(Number(value)) || Number(value) < 0)) {
           e.currentTarget.value = "";
@@ -144,7 +138,6 @@
     />
   </div>
 
-  <!-- Arguments -->
   <div>
     <p class="text-sm font-medium mb-3">Command Arguments</p>
     <div class="space-y-2">
@@ -191,7 +184,6 @@
     </div>
   </div>
 
-  <!-- Environment Variables -->
   <div>
     <p class="text-sm font-medium mb-3">Environment Variables</p>
     <div class="space-y-2">
@@ -205,7 +197,6 @@
             title="Variable name should contain only letters, numbers, and underscores, and not start with a number"
             class="input flex-1 font-mono"
             oninput={(e) => {
-              // Auto-convert to uppercase and validate
               const value = e.currentTarget.value;
               e.currentTarget.value = value.toUpperCase();
               envVar.key = e.currentTarget.value;
@@ -237,7 +228,6 @@
     </div>
   </div>
 
-  <!-- Save Button -->
   <div class="flex justify-end">
     <button
       class="btn preset-filled"
