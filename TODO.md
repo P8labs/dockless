@@ -56,4 +56,4 @@
 - [x] Make a beautiful landing page
 - [x] Write docs about how to setup dockless
 - [x] Sanitize the SEO and metadata
-- [ ] Release first version and test everything works
+- [x] Release first version and test everything works

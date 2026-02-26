@@ -32,6 +32,12 @@ jobs:
           chmod +x release/dockless-* || true
           ls -lh release
 
+      - name: Generate SHA256 checksums
+        run: |
+          cd release
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: dockless-binaries

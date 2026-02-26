@@ -34,9 +34,13 @@ require_root() {
 }
 
 check_installed() {
-  if [ ! -f "$BINARY_PATH" ]; then
-    error "Dockless is not installed at $BINARY_PATH"
-  fi
+  [ -f "$BINARY_PATH" ] || error "Dockless not found at $BINARY_PATH"
+}
+
+check_dependencies() {
+  for cmd in curl sha256sum systemctl; do
+    command -v $cmd >/dev/null 2>&1 || error "Missing dependency: $cmd"
+  done
 }
 
 detect_arch() {
@@ -79,31 +83,51 @@ compare_versions() {
   fi
 }
 
-download_new_binary() {
-  ASSET="${BINARY_NAME}-${LATEST_VERSION}-linux-${ARCH}.tar.gz"
-  URL="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}/${ASSET}"
+download_and_verify() {
+  ASSET="${BINARY_NAME}-${LATEST_VERSION}-linux-${ARCH}"
+  BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}"
+  BINARY_URL="${BASE_URL}/${ASSET}"
+  CHECKSUM_URL="${BASE_URL}/checksums.txt"
 
-  log "Downloading $ASSET..."
-
+  log "Downloading new binary..."
   TMP_DIR=$(mktemp -d)
 
-  curl -fL "$URL" -o "$TMP_DIR/$ASSET" || error "Download failed."
-  tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR" || error "Extraction failed."
+  curl -fL "$BINARY_URL" -o "$TMP_DIR/$ASSET" || error "Binary download failed."
 
-  [ -f "$TMP_DIR/$BINARY_NAME" ] || error "Binary not found in archive."
+  log "Attempting checksum verification..."
 
-  mv "$TMP_DIR/$BINARY_NAME" "$BINARY_PATH"
+  if curl -fsL "$CHECKSUM_URL" -o "$TMP_DIR/checksums.txt"; then
+    cd "$TMP_DIR"
+
+    EXPECTED_SUM=$(grep "$ASSET" checksums.txt | awk '{print $1}' || true)
+
+    if [ -n "$EXPECTED_SUM" ]; then
+      ACTUAL_SUM=$(sha256sum "$ASSET" | awk '{print $1}')
+
+      if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+        error "Checksum mismatch. Aborting upgrade."
+      fi
+
+      log "Checksum verified."
+    else
+      log "Checksum entry not found. Skipping verification."
+    fi
+  else
+    log "No checksums.txt found. Skipping verification."
+  fi
+
+  mv "$TMP_DIR/$ASSET" "$BINARY_PATH"
   chmod +x "$BINARY_PATH"
 
-  log "Binary upgraded successfully."
+  log "Binary replaced successfully."
 }
 
 restart_service() {
+  log "Restarting Dockless..."
+
   if systemctl is-active --quiet dockless; then
-    log "Restarting Dockless..."
     systemctl restart dockless
   else
-    log "Dockless service not running. Starting..."
     systemctl start dockless
   fi
 
@@ -116,12 +140,13 @@ restart_service() {
 
 
 require_root
+check_dependencies
 check_installed
 detect_arch
 get_current_version
 fetch_latest_version
 compare_versions
-download_new_binary
+download_and_verify
 restart_service
 
 log "Upgrade complete."

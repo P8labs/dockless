@@ -30,7 +30,6 @@ cleanup() {
 trap 'error "Installation failed at line $LINENO. Aborting."' ERR
 trap cleanup EXIT
 
-
 require_root() {
   if [ "$EUID" -ne 0 ]; then
     error "Please run as root (use sudo)."
@@ -38,7 +37,7 @@ require_root() {
 }
 
 check_dependencies() {
-  for cmd in curl tar systemctl; do
+  for cmd in curl systemctl sha256sum ss; do
     command -v $cmd >/dev/null 2>&1 || error "Required dependency missing: $cmd"
   done
 }
@@ -59,16 +58,15 @@ detect_arch() {
 }
 
 check_systemd() {
-  command -v systemctl >/dev/null 2>&1 || error "systemd not detected. Dockless currently requires systemd."
+  command -v systemctl >/dev/null 2>&1 || error "systemd not detected."
 }
 
 check_port_available() {
   PORT=3080
   if ss -tuln | grep -q ":$PORT "; then
-    error "Port $PORT is already in use. Please free the port before installing."
+    error "Port $PORT is already in use. Please free it before installing."
   fi
 }
-
 
 fetch_latest_release() {
   log "Fetching latest release..."
@@ -82,26 +80,44 @@ fetch_latest_release() {
   log "Latest version: $VERSION"
 }
 
-download_binary() {
-  ASSET="${BINARY_NAME}-${VERSION}-linux-${ARCH}.tar.gz"
-  URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${ASSET}"
+download_and_verify() {
+  ASSET="${BINARY_NAME}-${VERSION}-linux-${ARCH}"
+  BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}"
+  BINARY_URL="${BASE_URL}/${ASSET}"
+  CHECKSUM_URL="${BASE_URL}/checksums.txt"
 
-  log "Downloading $ASSET..."
-
+  log "Downloading binary..."
   TMP_DIR=$(mktemp -d)
 
-  curl -fL "$URL" -o "$TMP_DIR/$ASSET" || error "Download failed."
+  curl -fL "$BINARY_URL" -o "$TMP_DIR/$ASSET" || error "Binary download failed."
 
-  tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR" || error "Extraction failed."
+  log "Attempting checksum verification..."
 
-  [ -f "$TMP_DIR/$BINARY_NAME" ] || error "Binary not found in archive."
+  if curl -fsL "$CHECKSUM_URL" -o "$TMP_DIR/checksums.txt"; then
+    cd "$TMP_DIR"
 
-  mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    EXPECTED_SUM=$(grep "$ASSET" checksums.txt | awk '{print $1}' || true)
+
+    if [ -n "$EXPECTED_SUM" ]; then
+      ACTUAL_SUM=$(sha256sum "$ASSET" | awk '{print $1}')
+
+      if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+        error "Checksum mismatch. Aborting installation."
+      fi
+
+      log "Checksum verified."
+    else
+      log "Checksum entry not found. Skipping verification."
+    fi
+  else
+    log "No checksums.txt found. Skipping verification."
+  fi
+
+  mv "$TMP_DIR/$ASSET" "$INSTALL_DIR/$BINARY_NAME"
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
   log "Binary installed to $INSTALL_DIR/$BINARY_NAME"
 }
-
 
 setup_config() {
   log "Setting up configuration..."
@@ -114,12 +130,11 @@ setup_config() {
 data_dir = "$DATA_DIR"
 listen_port = 3080
 EOF
-    log "Created default config at $CONFIG_FILE"
+    log "Created default config."
   else
     log "Existing config detected. Skipping."
   fi
 }
-
 
 setup_systemd() {
   log "Creating systemd service..."
@@ -184,7 +199,7 @@ detect_arch
 check_systemd
 check_port_available
 fetch_latest_release
-download_binary
+download_and_verify
 setup_config
 setup_systemd
 verify_install
