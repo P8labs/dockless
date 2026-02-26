@@ -123,6 +123,7 @@ setup_config() {
 
   if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" <<EOF
+node_id = "./node_id"
 data_dir = "$DATA_DIR"
 listen_port = 3080
 EOF
@@ -142,10 +143,10 @@ After=network.target
 
 [Service]
 ExecStart=$INSTALL_DIR/$BINARY_NAME
+WorkingDirectory=$CONFIG_DIR
 Restart=always
 RestartSec=3
 User=root
-WorkingDirectory=$CONFIG_DIR
 
 [Install]
 WantedBy=multi-user.target
