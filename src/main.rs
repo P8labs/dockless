@@ -20,6 +20,13 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "--version" {
+        const VERSION: &str = env!("CARGO_PKG_VERSION");
+        println!("dockless {}", VERSION);
+        std::process::exit(0);
+    }
+
     if let Err(e) = run().await {
         error!(error = ?e, "dockless failed to start");
         std::process::exit(1);

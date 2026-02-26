@@ -45,3 +45,15 @@
 - [x] deallocating and killing the service from port.
 - [x] addes settings page to edit the service definations
 - [x] add option to refresh and clean logs
+
+[25/02/2026]
+
+- [x] add landing page website and docs.
+- [x] added github actions and dockerfile to make a release.
+
+[26/02/2026]
+
+- [x] Make a beautiful landing page
+- [x] Write docs about how to setup dockless
+- [x] Sanitize the SEO and metadata
+- [ ] Release first version and test everything works

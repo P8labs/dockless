@@ -1,0 +1,49 @@
+# Git
+
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+
+**/target/
+**/node*modules/
+release/
+**/\*.db
+**/*.db-\_
+
+# IDE
+
+.vscode/
+.idea/
+_.swp
+_.swo
+\*~
+
+# Environment
+
+.env
+.env.local
+\*.local
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Documentation build
+
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Temporary files
+
+_.log
+_.tmp
+tmp/
+
+# Docker
+
+docker-compose\*.yml
+Dockerfile.builder
+Dockerfile.build

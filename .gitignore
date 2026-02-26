@@ -4,3 +4,5 @@ node_id
 /demo/*
 /dle_*/*
 *.db
+
+release/*

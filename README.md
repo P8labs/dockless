@@ -1,6 +1,6 @@
 # Dockless
 
-This is a simple Platform as a service written in rust for Raspberry Pi nodes.
+Dockless is a lightweight Platform as a Service (PaaS) designed for Raspberry Pi nodes, written in Rust. It enables users to easily manage, monitor, and deploy single-binary Rust applications on their Raspberry Pi devices. The project aims to simplify self-hosting for side projects by providing a predictable and minimal environment, without the complexity of containers or external runtimes. Dockless is intended to run as a system service, making it suitable for integration into custom OS images and automatic startup on boot.
 
 ## Why I am building this?
 

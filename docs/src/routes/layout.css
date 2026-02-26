@@ -1,0 +1,40 @@
+@import "tailwindcss";
+@plugin '@tailwindcss/typography';
+
+@theme {
+  --color-accent: #6b8a10;
+  --color-accent-dark: #86b718;
+  --color-surface: #ffffff;
+  --color-bg: #f9fafb;
+  --color-bg-alt: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-ink: #111827;
+  --color-ink-mid: #374151;
+  --color-ink-mute: #6b7280;
+
+  --font-sans: "Urbanist", system-ui, sans-serif;
+
+  --radius-btn: 8px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.icon svg {
+  display: inline-block;
+  vertical-align: middle;
+}
