@@ -3,12 +3,7 @@
   import { store } from "$lib/services.svelte";
   import { formatUptime } from "$lib/utils";
   import { toaster } from "./Toast.svelte";
-  import {
-    ServerIcon,
-    CopyIcon,
-    CircleDotIcon,
-    ClockIcon,
-  } from "lucide-svelte";
+  import { CopyIcon, CircleDotIcon, ClockIcon } from "lucide-svelte";
 
   const health = $derived(store.health);
   const loading = $derived(store.loading);
@@ -17,9 +12,11 @@
 <AppBar class="bg-surface-50-950/60! shadow-xl backdrop-blur-sm">
   <AppBar.Toolbar class="grid-cols-[auto_1fr_auto]">
     <AppBar.Lead>
-      <div class="flex items-center gap-2 px-2">
-        <ServerIcon class="w-5 h-5 md:w-6 md:h-6 text-primary-500" />
-      </div>
+      <img
+        class="w-10 h-10 text-primary-500"
+        src="https://dockless.p8labs.tech/logo.png"
+        alt="Dockless"
+      />
     </AppBar.Lead>
     <AppBar.Headline>
       <div>
@@ -41,7 +38,6 @@
             ></div>
           </div>
         {:else if health}
-          <!-- Node ID -->
           <button
             class="hidden sm:flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 rounded-lg bg-surface-100-800 hover:bg-surface-200-700 transition-colors"
             title="Click to copy Node ID: {health.node_id}"
@@ -59,7 +55,6 @@
             <CopyIcon class="w-3 h-3 opacity-40" />
           </button>
 
-          <!-- Status Badge -->
           <div
             class="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 rounded-full {health.status ===
             'alive'
@@ -80,7 +75,6 @@
             </span>
           </div>
 
-          <!-- Uptime -->
           <div
             class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-100-800"
             title="Node uptime"

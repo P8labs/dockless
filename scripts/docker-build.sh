@@ -15,11 +15,20 @@ echo -e "${BLUE}═════════════════════�
 rm -rf release
 mkdir -p release
 
+CARGO_TOML="Cargo.toml"
+
+get_version() {
+    grep '^version = ' "$CARGO_TOML" | head -n1 | sed 's/version = "\(.*\)"/\1/'
+}
+CURRENT_VERSION=$(get_version)
+
 echo -e "${YELLOW}Building Docker image with all platforms...${NC}"
-docker build -f Dockerfile -t dockless-builder:latest . || {
+docker build -f Dockerfile --build-arg TARGET=x86_64-unknown-linux-musl --build-arg VERSION=${CURRENT_VERSION} -t dockless-builder:latest . || {
     echo -e "${RED} Build failed${NC}"
     exit 1
 }
+
+
 
 echo -e "${YELLOW}Extracting binaries...${NC}"
 CONTAINER_ID=$(docker create dockless-builder:latest /bin/sh)

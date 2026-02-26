@@ -57,3 +57,4 @@
 - [x] Write docs about how to setup dockless
 - [x] Sanitize the SEO and metadata
 - [x] Release first version and test everything works
+- [x] Added parallelism in releasing binaries

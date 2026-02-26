@@ -10,79 +10,103 @@ on:
         description: "Version to release (e.g., 1.2.3)"
         required: true
         type: string
+
 permissions:
   contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: amd
+          - target: aarch64-unknown-linux-musl
+            arch: arm64
+          - target: armv7-unknown-linux-musleabihf
+            arch: armv7
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build release artifacts
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=v${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          fi
+
+      - name: Build ${{ matrix.target }}
         run: |
           docker buildx build \
             --build-arg VERSION=$VERSION \
+            --build-arg TARGET=${{ matrix.target }} \
+            --build-arg ARCH=${{ matrix.arch }} \
             --file Dockerfile \
             --output type=local,dest=release \
             .
 
-          chmod +x release/dockless-* || true
-          ls -lh release
-
-      - name: Generate per-file SHA256 checksums
+      - name: Generate SHA256 checksums
         run: |
           cd release
           for file in dockless-*; do
             sha256sum "$file" > "$file.sha256"
           done
-          ls -lh
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: dockless-binaries
+          name: dockless-${{ matrix.target }}
           path: release/*
 
   release:
     needs: build
     runs-on: ubuntu-latest
+
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dockless-binaries
-          path: .
+          path: artifacts
+
+      - name: Flatten artifact structure
+        run: |
+          mkdir release
+          find artifacts -type f -exec cp {} release/ \;
+          ls -lh release
 
       - name: Determine version
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
             echo "tag_name=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag_name }}
+          generate_release_notes: true
+          make_latest: true
           body: |
             ## Dockless Edge Runtime Platform
 
             A lightweight Platform as a Service (PaaS) designed for Raspberry Pi nodes, written in Rust.
 
             ### Supported Platforms
-            - **Linux x86_64** (Intel/AMD 64-bit)
-            - **Linux ARM64** (aarch64 - Raspberry Pi 4, ARM servers)
-            - **Linux ARMv7** (32-bit ARM - Raspberry Pi 2/3)
+            - Linux x86_64 (Intel/AMD 64-bit)
+            - Linux ARM64 (aarch64 - Raspberry Pi 4, ARM servers)
+            - Linux ARMv7 (32-bit ARM - Raspberry Pi 2/3)
 
             ### Installation
-            See the [documentation](https://p8labs.github.io/dockless) for complete setup instructions.
-          generate_release_notes: true
-          make_latest: true
-          files: "*"
+            See the [documentation](https://p8labs.github.io/dockless) for more information.
+          files: release/*

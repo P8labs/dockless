@@ -9,9 +9,19 @@ import type {
   ServiceStats,
 } from "./types";
 
-const BASE = "http://localhost:8000/api";
+function getBASEURL(): string {
+  let BASE;
+
+  if (import.meta.env.DEV) {
+    BASE = "http://localhost:8000/api";
+  } else {
+    BASE = `${import.meta.env.BASE_URL}api`;
+  }
+  return BASE;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = `${BASE}${path}`;
+  const url = `${getBASEURL()}${path}`;
   const res = await fetch(url, options);
   const data = await res.json();
   if (!res.ok) {
@@ -168,7 +178,7 @@ export async function clearLogs(id: string): Promise<ApiResponse> {
 }
 
 export function streamLogs(id: string): EventSource {
-  return new EventSource(`${BASE}/services/${id}/logs/stream`);
+  return new EventSource(`${getBASEURL()}/services/${id}/logs/stream`);
 }
 
 export async function getServiceStats(id: string): Promise<ServiceStats> {

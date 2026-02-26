@@ -6,7 +6,8 @@ use axum::{
 };
 
 use reqwest::{StatusCode, header};
-use rust_embed::RustEmbed;
+
+use rust_embed::Embed;
 use serde_json::json;
 use std::net::SocketAddr;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -17,7 +18,7 @@ use crate::{
     platform::node::Node,
 };
 
-#[derive(RustEmbed)]
+#[derive(Embed)]
 #[folder = "portal/build/"]
 struct PortalAssets;
 
@@ -29,9 +30,8 @@ pub async fn start_api(node: &Node) -> anyhow::Result<()> {
         .with_state(node.clone());
 
     let app = Router::new()
-        .nest("/api", api_routes)
+        .nest("/api", api_routes.fallback(api_fallback))
         .fallback(serve_console)
-        .fallback(api_fallback)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

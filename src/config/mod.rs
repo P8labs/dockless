@@ -10,7 +10,7 @@ pub struct Config {
 }
 
 pub fn load_config() -> Result<Config> {
-    let config_path = std::env::var("DLESS_CONFIG").unwrap_or_else(|_| "dockless.toml".to_string());
+    let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "config.toml".to_string());
 
     if std::path::Path::new(&config_path).exists() {
         let content = std::fs::read_to_string(&config_path)?;
@@ -25,8 +25,8 @@ pub fn load_config() -> Result<Config> {
 fn default_config() -> Config {
     Config {
         node_id: "./node_id".to_string(),
-        data_dir: std::env::var("DLESS_DATA_PATH").unwrap_or_else(|_| "./dle_data".to_string()),
-        listen_port: std::env::var("DLESS_PORT")
+        data_dir: std::env::var("DATA_PATH").unwrap_or_else(|_| "./data".to_string()),
+        listen_port: std::env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(8000),
