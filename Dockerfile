@@ -9,6 +9,8 @@ COPY portal/ ./
 RUN pnpm build
 
 FROM ghcr.io/rust-cross/cargo-zigbuild:latest AS builder
+ARG VERSION
+ENV VERSION=${VERSION}
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -49,17 +51,17 @@ RUN mkdir /out
 
 
 RUN cargo zigbuild --release --target x86_64-unknown-linux-musl \
- && cp target/x86_64-unknown-linux-musl/release/dockless /out/dockless-linux-amd64
+ && cp target/x86_64-unknown-linux-musl/release/dockless /out/dockless-${VERSION}-linux-amd64
 
 
 RUN rustup target add aarch64-unknown-linux-musl
 RUN cargo zigbuild --release --target aarch64-unknown-linux-musl \
-&& cp target/aarch64-unknown-linux-musl/release/dockless /out/dockless-linux-arm64
+&& cp target/aarch64-unknown-linux-musl/release/dockless /out/dockless-${VERSION}-linux-arm64
 
 
 RUN rustup target add armv7-unknown-linux-musleabihf
 RUN cargo zigbuild --release --target armv7-unknown-linux-musleabihf \
-&& cp target/armv7-unknown-linux-musleabihf/release/dockless /out/dockless-linux-armv7
+&& cp target/armv7-unknown-linux-musleabihf/release/dockless /out/dockless-${VERSION}-linux-armv7
 
 
 FROM scratch

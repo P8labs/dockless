@@ -25,6 +25,7 @@ jobs:
       - name: Build release artifacts
         run: |
           docker buildx build \
+            --build-arg VERSION=$VERSION \
             --file Dockerfile \
             --output type=local,dest=release \
             .
@@ -32,11 +33,13 @@ jobs:
           chmod +x release/dockless-* || true
           ls -lh release
 
-      - name: Generate SHA256 checksums
+      - name: Generate per-file SHA256 checksums
         run: |
           cd release
-          sha256sum * > checksums.txt
-          cat checksums.txt
+          for file in dockless-*; do
+            sha256sum "$file" > "$file.sha256"
+          done
+          ls -lh
 
       - uses: actions/upload-artifact@v4
         with:

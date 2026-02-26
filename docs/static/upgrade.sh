@@ -46,8 +46,8 @@ check_dependencies() {
 detect_arch() {
   ARCH=$(uname -m)
   case "$ARCH" in
-    x86_64) ARCH="x86_64" ;;
-    aarch64 | arm64) ARCH="aarch64" ;;
+    x86_64) ARCH="amd64" ;;
+    aarch64 | arm64) ARCH="arm64" ;;
     armv7l) ARCH="armv7" ;;
     *) error "Unsupported architecture: $ARCH" ;;
   esac
@@ -87,7 +87,7 @@ download_and_verify() {
   ASSET="${BINARY_NAME}-${LATEST_VERSION}-linux-${ARCH}"
   BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}"
   BINARY_URL="${BASE_URL}/${ASSET}"
-  CHECKSUM_URL="${BASE_URL}/checksums.txt"
+  CHECKSUM_URL="${BASE_URL}/${ASSET}.sha256"
 
   log "Downloading new binary..."
   TMP_DIR=$(mktemp -d)
@@ -96,24 +96,19 @@ download_and_verify() {
 
   log "Attempting checksum verification..."
 
-  if curl -fsL "$CHECKSUM_URL" -o "$TMP_DIR/checksums.txt"; then
+  if curl -fsL "$CHECKSUM_URL" -o "$TMP_DIR/$ASSET.sha256"; then
     cd "$TMP_DIR"
 
-    EXPECTED_SUM=$(grep "$ASSET" checksums.txt | awk '{print $1}' || true)
+    EXPECTED_SUM=$(awk '{print $1}' "$ASSET.sha256")
+    ACTUAL_SUM=$(sha256sum "$ASSET" | awk '{print $1}')
 
-    if [ -n "$EXPECTED_SUM" ]; then
-      ACTUAL_SUM=$(sha256sum "$ASSET" | awk '{print $1}')
-
-      if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
-        error "Checksum mismatch. Aborting upgrade."
-      fi
-
-      log "Checksum verified."
-    else
-      log "Checksum entry not found. Skipping verification."
+    if [ "$EXPECTED_SUM" != "$ACTUAL_SUM" ]; then
+      error "Checksum mismatch. Aborting upgrade."
     fi
+
+    log "Checksum verified."
   else
-    log "No checksums.txt found. Skipping verification."
+    log "No checksum file found. Skipping verification."
   fi
 
   mv "$TMP_DIR/$ASSET" "$BINARY_PATH"
