@@ -15,7 +15,7 @@ function getBASEURL(): string {
   if (import.meta.env.DEV) {
     BASE = "http://localhost:8000/api";
   } else {
-    BASE = `${import.meta.env.BASE_URL}api`;
+    BASE = `/api`;
   }
   return BASE;
 }

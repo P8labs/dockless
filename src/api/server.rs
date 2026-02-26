@@ -1,6 +1,7 @@
 use anyhow::Context;
 use axum::{
     Json, Router,
+    extract::DefaultBodyLimit,
     http::Uri,
     response::{IntoResponse, Response},
 };
@@ -33,7 +34,8 @@ pub async fn start_api(node: &Node) -> anyhow::Result<()> {
         .nest("/api", api_routes.fallback(api_fallback))
         .fallback(serve_console)
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 200));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], node.config.listen_port));
 

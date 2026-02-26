@@ -141,8 +141,8 @@ async fn init_service(
         binary_path: String::new(),
         args: vec![],
         env: HashMap::new(),
-        auto_restart: true,
-        restart_limit: None,
+        auto_restart: false,
+        restart_limit: Some(3),
         current_version: None,
         port: None,
     };
@@ -752,15 +752,52 @@ pub async fn upload_artifact(
     let mut file_name: Option<String> = None;
     let mut file_bytes: Option<Vec<u8>> = None;
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Some(field) = match multipart.next_field().await {
+        Ok(f) => f,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "status": false,
+                    "error": format!("multipart read error: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    } {
         match field.name() {
-            Some("version") => {
-                version = Some(field.text().await.unwrap_or_default());
-            }
+            Some("version") => match field.text().await {
+                Ok(v) => version = Some(v),
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "status": false,
+                            "error": format!("failed reading version: {}", e)
+                        })),
+                    )
+                        .into_response();
+                }
+            },
+
             Some("file") => {
                 file_name = field.file_name().map(|s| s.to_string());
-                file_bytes = Some(field.bytes().await.unwrap().to_vec());
+
+                match field.bytes().await {
+                    Ok(bytes) => file_bytes = Some(bytes.to_vec()),
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "status": false,
+                                "error": format!("failed reading file: {}", e)
+                            })),
+                        )
+                            .into_response();
+                    }
+                }
             }
+
             _ => {}
         }
     }

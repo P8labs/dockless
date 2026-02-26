@@ -58,3 +58,4 @@
 - [x] Sanitize the SEO and metadata
 - [x] Release first version and test everything works
 - [x] Added parallelism in releasing binaries
+- [x] Tested upload and github install both and increase body limit to 200mbs
