@@ -7,7 +7,7 @@
 
   const nav = [
     { title: "Introduction", href: "/docs" },
-    { title: "Get Started", href: "/docs/get-started" },
+    { title: "Get Started", href: "/docs/getting-started" },
     { title: "Configuration", href: "/docs/configuration" },
     { title: "Runtime Model", href: "/docs/runtime-model" },
     { title: "Supported Runtimes", href: "/docs/supported-runtimes" },

@@ -60,7 +60,7 @@
         </a>
 
         <a
-          href="/docs/introduction"
+          href="/docs"
           id="hero-docs"
           class="inline-flex items-center gap-2 px-5 py-2.5 rounded-sm bg-white border border-[#d1d5db] text-ink font-semibold text-sm hover:border-accent hover:bg-bg transition-colors"
         >
