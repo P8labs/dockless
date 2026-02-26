@@ -84,7 +84,7 @@ create_tag() {
     local tag="v$version"
     
     echo -e "${YELLOW}Creating git tag: $tag${NC}"
-    git add "$CARGO_TOML" "$PACKAGE_JSON"
+    git add .
     git commit -m "chore: bump version to $version"
     git tag -a "$tag" -m "Release $version"
     
