@@ -35,6 +35,11 @@ pub struct ServiceDefinition {
     #[serde(default)]
     pub current_version: Option<String>,
 
+    /// Linux capabilities to grant to the binary via `setcap` before starting,
+    /// e.g. `["cap_net_raw+eip", "cap_net_admin+eip"]`.
+    #[serde(default)]
+    pub linux_capabilities: Vec<String>,
+
     #[serde(skip)]
     pub port: Option<u16>,
 }

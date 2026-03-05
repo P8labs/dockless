@@ -18,6 +18,7 @@ struct RegistryEntry {
     auto_restart: bool,
     restart_limit: Option<u32>,
     current_version: Option<String>,
+    linux_capabilities: Vec<String>,
     port: Option<u16>,
 }
 
@@ -66,6 +67,7 @@ async fn get_registry(State(node): State<Node>) -> impl IntoResponse {
                 auto_restart: def.auto_restart,
                 restart_limit: def.restart_limit,
                 current_version: def.current_version.clone(),
+                linux_capabilities: def.linux_capabilities.clone(),
                 port,
             }
         })

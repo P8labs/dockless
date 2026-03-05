@@ -63,4 +63,7 @@
 [05/03/2026]
 - [x] Fixed Port Mangement not working only allocating the port in a registry [issue (#1)](https://github.com/P8labs/dockless/issues/1)
 - [x] Fixed binary not found while using installer script with curl [issue (#2)](https://github.com/P8labs/dockless/issues/2)
+- [x] Implement a way to give some special permissions [issue (#3)](https://github.com/P8labs/dockless/issues/3)
+- [x] Add option to declare auto start and restart limit while creating the service [issue (#4)](https://github.com/P8labs/dockless/issues/4)
+
 

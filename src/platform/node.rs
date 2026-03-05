@@ -64,6 +64,7 @@ impl Node {
                 env,
                 def.auto_restart,
                 def.restart_limit,
+                def.linux_capabilities.clone(),
                 service_root,
             );
 

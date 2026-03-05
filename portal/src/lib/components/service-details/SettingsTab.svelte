@@ -13,6 +13,7 @@
       restart_limit: number | null;
       env: Record<string, string>;
       args: string[];
+      linux_capabilities: string[];
     }) => void;
     saving: boolean;
   } = $props();
@@ -22,6 +23,8 @@
   let envVars = $state<Array<{ key: string; value: string }>>([]);
   let args = $state<string[]>([]);
   let newArg = $state("");
+  let capabilities = $state<string[]>([]);
+  let capInput = $state("");
 
   $effect(() => {
     if (serviceDetail) {
@@ -32,8 +35,21 @@
         value,
       }));
       args = [...serviceDetail.args];
+      capabilities = [...(serviceDetail.linux_capabilities ?? [])];
     }
   });
+
+  function addCapability() {
+    const cap = capInput.trim();
+    if (cap && !capabilities.includes(cap)) {
+      capabilities = [...capabilities, cap];
+    }
+    capInput = "";
+  }
+
+  function removeCapability(i: number) {
+    capabilities = capabilities.filter((_, idx) => idx !== i);
+  }
 
   function addEnvVar() {
     envVars = [...envVars, { key: "", value: "" }];
@@ -92,6 +108,7 @@
         restart_limit: limit,
         env,
         args: validArgs,
+        linux_capabilities: capabilities.map((c) => c.trim()).filter(Boolean),
       });
     } catch (error) {
       console.error("Error saving settings:", error);
@@ -225,6 +242,52 @@
         <Plus class="w-4 h-4" />
         Add Variable
       </button>
+    </div>
+  </div>
+
+  <div>
+    <p class="text-sm font-medium mb-1">Linux Capabilities</p>
+    <p class="text-xs opacity-60 mb-3">
+      Grant capabilities to the binary via <code class="font-mono">setcap</code
+      >, e.g. <code class="font-mono">cap_net_raw+eip</code>
+    </p>
+    <div class="space-y-2">
+      {#each capabilities as cap, i}
+        <div class="flex items-center gap-2">
+          <span
+            class="font-mono text-xs px-2 py-1 rounded bg-surface-100-800 flex-1"
+            >{cap}</span
+          >
+          <button
+            class="btn preset-outlined-error w-8 h-8 p-0 flex items-center justify-center"
+            onclick={() => removeCapability(i)}
+            title="Remove"
+          >
+            <Trash2 class="w-3 h-3" />
+          </button>
+        </div>
+      {/each}
+      <div class="flex items-center gap-2">
+        <input
+          type="text"
+          bind:value={capInput}
+          placeholder="e.g. cap_net_raw+eip"
+          class="input flex-1 font-mono text-sm"
+          onkeydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCapability();
+            }
+          }}
+        />
+        <button
+          class="btn preset-outlined w-8 h-8 p-0 flex items-center justify-center"
+          onclick={addCapability}
+          title="Add capability"
+        >
+          <Plus class="w-4 h-4" />
+        </button>
+      </div>
     </div>
   </div>
 

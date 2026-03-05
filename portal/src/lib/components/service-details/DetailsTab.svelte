@@ -51,4 +51,18 @@
       </div>
     </div>
   {/if}
+  {#if serviceDetail?.linux_capabilities && serviceDetail.linux_capabilities.length > 0}
+    <div>
+      <p class="text-xs opacity-60 mb-1">Linux Capabilities</p>
+      <div class="flex flex-wrap gap-1.5">
+        {#each serviceDetail.linux_capabilities as cap}
+          <span
+            class="text-xs font-mono px-2 py-1 rounded bg-amber-500/10 text-amber-600"
+          >
+            {cap}
+          </span>
+        {/each}
+      </div>
+    </div>
+  {/if}
 </div>

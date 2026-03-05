@@ -87,6 +87,12 @@ struct InitServiceRequest {
     name: String,
     #[serde(default)]
     id: Option<String>,
+    #[serde(default)]
+    auto_restart: Option<bool>,
+    #[serde(default)]
+    restart_limit: Option<u32>,
+    #[serde(default)]
+    linux_capabilities: Vec<String>,
 }
 
 async fn init_service(
@@ -141,9 +147,10 @@ async fn init_service(
         binary_path: String::new(),
         args: vec![],
         env: HashMap::new(),
-        auto_restart: false,
-        restart_limit: Some(3),
+        auto_restart: req.auto_restart.unwrap_or(false),
+        restart_limit: req.restart_limit.or(Some(3)),
         current_version: None,
+        linux_capabilities: req.linux_capabilities.clone(),
         port: None,
     };
 
@@ -260,6 +267,7 @@ async fn get_service(State(node): State<Node>, Path(id): Path<String>) -> impl I
         "auto_restart": def.auto_restart,
         "restart_limit": def.restart_limit,
         "current_version": def.current_version,
+        "linux_capabilities": def.linux_capabilities,
     });
 
     if let Some(port_num) = port {
@@ -279,6 +287,8 @@ pub struct ConfigureServiceRequest {
     pub auto_restart: Option<bool>,
     #[serde(default)]
     pub restart_limit: Option<u32>,
+    #[serde(default)]
+    pub linux_capabilities: Option<Vec<String>>,
 }
 
 async fn configure_service(
@@ -307,6 +317,7 @@ async fn configure_service(
         args: req.args,
         auto_restart: req.auto_restart.unwrap_or(def.auto_restart),
         restart_limit: req.restart_limit,
+        linux_capabilities: req.linux_capabilities.unwrap_or(def.linux_capabilities),
         ..def
     };
 
@@ -661,6 +672,7 @@ async fn create_service(
         env,
         def.auto_restart,
         def.restart_limit.or(Some(3)),
+        def.linux_capabilities.clone(),
         service_root.clone(),
     );
 
@@ -963,6 +975,7 @@ pub async fn upload_artifact(
                 env,
                 def.auto_restart,
                 def.restart_limit,
+                def.linux_capabilities.clone(),
                 service_root,
             );
             drop(registry);
@@ -1239,6 +1252,7 @@ pub async fn install_github_artifact(
                 env,
                 def.auto_restart,
                 def.restart_limit,
+                def.linux_capabilities.clone(),
                 service_root,
             );
             drop(registry);
