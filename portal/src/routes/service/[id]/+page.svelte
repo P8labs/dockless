@@ -196,6 +196,7 @@
     restart_limit: number | null;
     env: Record<string, string>;
     args: string[];
+    linux_capabilities: string[];
   }) {
     if (!service) return;
     settingsSaving = true;

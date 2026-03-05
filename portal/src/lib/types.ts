@@ -15,6 +15,7 @@ export interface ServiceDefinition {
   auto_restart: boolean;
   restart_limit: number | null;
   current_version: string | null;
+  linux_capabilities: string[];
   port?: number;
 }
 

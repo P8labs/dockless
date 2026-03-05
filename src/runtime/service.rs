@@ -24,6 +24,7 @@ pub struct Service {
     pub env: HashMap<String, String>,
     pub auto_restart: bool,
     pub restart_limit: Option<u32>,
+    pub linux_capabilities: Vec<String>,
 
     pub working_dir: String,
 
@@ -41,6 +42,7 @@ impl Service {
         env: HashMap<String, String>,
         auto_restart: bool,
         restart_limit: Option<u32>,
+        linux_capabilities: Vec<String>,
         working_dir: String,
     ) -> Self {
         let log_file = PathBuf::from(&working_dir).join("logs").join("service.log");
@@ -52,6 +54,7 @@ impl Service {
             env,
             auto_restart,
             restart_limit,
+            linux_capabilities,
             working_dir,
             state: Arc::new(RwLock::new(ServiceState::Stopped)),
             log_buffer: LogBuffer::new(log_file),

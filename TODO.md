@@ -59,3 +59,11 @@
 - [x] Release first version and test everything works
 - [x] Added parallelism in releasing binaries
 - [x] Tested upload and github install both and increase body limit to 200mbs
+
+[05/03/2026]
+- [x] Fixed Port Mangement not working only allocating the port in a registry [issue (#1)](https://github.com/P8labs/dockless/issues/1)
+- [x] Fixed binary not found while using installer script with curl [issue (#2)](https://github.com/P8labs/dockless/issues/2)
+- [x] Implement a way to give some special permissions [issue (#4)](https://github.com/P8labs/dockless/issues/4)
+- [x] Add option to declare auto start and restart limit while creating the service [issue (#5)](https://github.com/P8labs/dockless/issues/5)
+
+

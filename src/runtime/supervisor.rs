@@ -83,6 +83,41 @@ impl Supervisor {
                 anyhow::bail!("{}", err_msg);
             }
 
+            // Apply Linux capabilities via `setcap` before starting the process.
+            if !service.linux_capabilities.is_empty() {
+                let cap_string = service.linux_capabilities.join(",");
+                let result = std::process::Command::new("setcap")
+                    .arg(&cap_string)
+                    .arg(&full_binary_path)
+                    .output();
+                match result {
+                    Ok(out) if out.status.success() => {
+                        tracing::info!("[{}] setcap '{}' applied", service.id, cap_string);
+                    }
+                    Ok(out) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        let err_msg = format!("setcap failed ({}): {}", out.status, stderr.trim());
+                        tracing::error!("[{}] {}", service.id, err_msg);
+                        service
+                            .log_buffer
+                            .push("error".to_string(), err_msg.clone())
+                            .await;
+                        service.set_state(ServiceState::Failed).await;
+                        anyhow::bail!("{}", err_msg);
+                    }
+                    Err(e) => {
+                        let err_msg = format!("failed to run setcap: {}", e);
+                        tracing::error!("[{}] {}", service.id, err_msg);
+                        service
+                            .log_buffer
+                            .push("error".to_string(), err_msg.clone())
+                            .await;
+                        service.set_state(ServiceState::Failed).await;
+                        anyhow::bail!("{}", err_msg);
+                    }
+                }
+            }
+
             let mut cmd = Command::new(&service.binary_path);
             cmd.args(&service.args);
             cmd.current_dir(&service.working_dir);

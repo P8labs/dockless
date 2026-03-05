@@ -57,11 +57,16 @@ export async function createService(
 export async function initService(
   name: string,
   id?: string,
+  options?: {
+    auto_restart?: boolean;
+    restart_limit?: number | null;
+    linux_capabilities?: string[];
+  },
 ): Promise<ApiResponse & { id?: string }> {
   return request("/services/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, id }),
+    body: JSON.stringify({ name, id, ...options }),
   });
 }
 
@@ -76,6 +81,7 @@ export async function configureService(
     args?: string[];
     auto_restart?: boolean;
     restart_limit?: number | null;
+    linux_capabilities?: string[];
   },
 ): Promise<ApiResponse> {
   return request(`/services/${id}/configure`, {

@@ -83,6 +83,12 @@
         >
       </div>
     {/if}
+    {#if service.port && service.state === "Running"}
+      <div class="flex items-center justify-between">
+        <span class="text-xs">Port</span>
+        <span class="font-mono text-xs opacity-40">:{service.port}</span>
+      </div>
+    {/if}
   </div>
 
   <div class="flex items-center gap-2 flex-wrap">
