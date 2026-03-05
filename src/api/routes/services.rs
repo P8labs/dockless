@@ -216,8 +216,38 @@ async fn get_service(State(node): State<Node>, Path(id): Path<String>) -> impl I
     };
 
     let port = {
+        let manager = node.manager.read().await;
         let port_manager = node.port_manager.read().await;
-        port_manager.get_port(&id)
+        if let Some(service) = manager.get_service(&id) {
+            if let Ok(pid_guard) = service.pid.try_read() {
+                if let Some(pid) = *pid_guard {
+                    let listening =
+                        crate::platform::port_manager::PortManager::get_listening_ports_for_pid(
+                            pid,
+                        );
+                    if !listening.is_empty() {
+                        let allocated = port_manager.get_port(&id);
+                        if let Some(a) = allocated {
+                            if listening.contains(&a) {
+                                Some(a)
+                            } else {
+                                Some(listening[0])
+                            }
+                        } else {
+                            Some(listening[0])
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     };
 
     let mut response = json!({

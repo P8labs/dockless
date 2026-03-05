@@ -70,12 +70,15 @@ impl Node {
             manager.register_service(service)?;
         }
 
+        let port_manager_arc = Arc::new(RwLock::new(port_manager));
+        manager.set_port_manager(Arc::clone(&port_manager_arc));
+
         return Ok(Self {
             node_id,
             config,
             registry: Arc::new(RwLock::new(registry)),
             manager: Arc::new(RwLock::new(manager)),
-            port_manager: Arc::new(RwLock::new(port_manager)),
+            port_manager: port_manager_arc,
         });
     }
 }

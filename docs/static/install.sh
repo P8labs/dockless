@@ -90,8 +90,8 @@ download_and_verify() {
   log "Downloading binary..."
   TMP_DIR=$(mktemp -d)
 
+  log "Downloading: $BINARY_URL"
   curl -fL "$BINARY_URL" -o "$TMP_DIR/$ASSET" || error "Binary download failed."
-
   log "Attempting checksum verification..."
 
   if curl -fsL "$CHECKSUM_URL" -o "$TMP_DIR/$ASSET.sha256"; then

@@ -99,6 +99,83 @@ impl PortManager {
         &self.allocations
     }
 
+    /// Returns all TCP ports the process with the given PID is currently listening on.
+    /// Reads /proc/<pid>/fd to find socket inodes, then correlates with /proc/net/tcp
+    /// and /proc/net/tcp6 (state 0A = LISTEN).
+    #[cfg(target_os = "linux")]
+    pub fn get_listening_ports_for_pid(pid: u32) -> Vec<u16> {
+        use std::collections::HashSet;
+
+        let mut socket_inodes: HashSet<u64> = HashSet::new();
+        let fd_dir = format!("/proc/{}/fd", pid);
+
+        if let Ok(entries) = std::fs::read_dir(&fd_dir) {
+            for entry in entries.flatten() {
+                if let Ok(target) = std::fs::read_link(entry.path()) {
+                    let s = target.to_string_lossy();
+                    if let Some(inner) =
+                        s.strip_prefix("socket:[").and_then(|s| s.strip_suffix("]"))
+                    {
+                        if let Ok(inode) = inner.parse::<u64>() {
+                            socket_inodes.insert(inode);
+                        }
+                    }
+                }
+            }
+        }
+
+        if socket_inodes.is_empty() {
+            return vec![];
+        }
+
+        let mut ports = Vec::new();
+        for path in &["/proc/net/tcp", "/proc/net/tcp6"] {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                for line in content.lines().skip(1) {
+                    let fields: Vec<&str> = line.split_whitespace().collect();
+                    if fields.len() < 10 {
+                        continue;
+                    }
+                    // State 0A = TCP_LISTEN
+                    if fields[3] != "0A" {
+                        continue;
+                    }
+                    if let Ok(inode) = fields[9].parse::<u64>() {
+                        if socket_inodes.contains(&inode) {
+                            // local_address format: hex_addr:hex_port
+                            if let Some(port_hex) = fields[1].split(':').nth(1) {
+                                if let Ok(port) = u16::from_str_radix(port_hex, 16) {
+                                    if !ports.contains(&port) {
+                                        ports.push(port);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ports
+    }
+
+    /// Checks whether any of `listening_ports` is already allocated to a service
+    /// *other* than `service_id`. Returns the conflicting (port, owner_service_id) pair.
+    pub fn find_conflict(
+        &self,
+        service_id: &str,
+        listening_ports: &[u16],
+    ) -> Option<(u16, String)> {
+        for &port in listening_ports {
+            for (other_id, &other_port) in &self.allocations {
+                if other_id.as_str() != service_id && other_port == port {
+                    return Some((port, other_id.clone()));
+                }
+            }
+        }
+        None
+    }
+
     fn save(&self) -> Result<()> {
         let file = PortsFile {
             version: 1,
