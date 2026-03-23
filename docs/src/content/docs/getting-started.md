@@ -27,7 +27,7 @@ Dockless currently requires systemd.
 Install using the official script:
 
 ```bash
-curl -fsSL https://dockless.p8labs.tech/install.sh | sudo bash
+curl -fsSL https://dockless.p8labs.in/install.sh | sudo bash
 ```
 
 The installer will:
@@ -125,7 +125,7 @@ The dashboard allows you to:
 To upgrade to the latest version:
 
 ```bash
-curl -fsSL https://dockless.p8labs.tech/upgrade.sh | sudo bash
+curl -fsSL https://dockless.p8labs.in/upgrade.sh | sudo bash
 ```
 
 The upgrade script will:

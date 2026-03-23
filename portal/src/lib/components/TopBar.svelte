@@ -14,7 +14,7 @@
     <AppBar.Lead>
       <img
         class="w-10 h-10 text-primary-500"
-        src="https://dockless.p8labs.tech/logo.png"
+        src="https://dockless.p8labs.in/logo.png"
         alt="Dockless"
       />
     </AppBar.Lead>

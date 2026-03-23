@@ -24,7 +24,7 @@
         >GitHub</a
       >
       <a
-        href="mailto:hello@p8labs.tech"
+        href="mailto:hello@p8labs.in"
         class="text-sm font-medium text-ink-mute hover:text-ink transition-colors"
         >Contact</a
       >
@@ -47,7 +47,7 @@
     <span class="font-semibold text-ink text-[0.95rem]"
       >© 2026 Dockless, Built at <a
         class="underline hover:text-accent transition-colors"
-        href="https://p8labs.tech">P8labs</a
+        href="https://p8labs.in">P8labs</a
       >.</span
     >
 
@@ -65,7 +65,7 @@
           >GitHub</a
         >
         <a
-          href="mailto:hello@p8labs.tech"
+          href="mailto:hello@p8labs.in"
           class="text-sm text-ink-mute hover:text-ink transition-colors"
           >Contact</a
         >
